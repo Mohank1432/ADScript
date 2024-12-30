@@ -1,0 +1,34 @@
+# Define the path to the text file
+$filePath = "C:\path\to\usernames.txt" # Replace with the actual path to your text file
+
+# Define the value for the attribute
+$hideFromAddressLists = $true # Set to $false if you want to unhide
+
+# Define the paths for the log files
+$successLogPath = "C:\path\to\success.log" # Replace with the actual path to your success log file
+$failureLogPath = "C:\path\to\failure.log" # Replace with the actual path to your failure log file
+
+# Import the Active Directory module
+Import-Module ActiveDirectory
+
+# Read the usernames from the text file
+$usernames = Get-Content -Path $filePath
+
+# Loop through each username and update the attribute
+foreach ($userName in $usernames) {
+    try {
+        # Get the user object
+        $user = Get-ADUser -Identity $userName
+
+        # Update the msExchHideFromAddressLists attribute
+        Set-ADUser -Identity $user -Replace @{msExchHideFromAddressLists=$hideFromAddressLists}
+
+        # Log success message
+        $successMessage = "[$(Get-Date)] Updated msExchHideFromAddressLists for user $userName to $hideFromAddressLists"
+        Add-Content -Path $successLogPath -Value $successMessage
+    } catch {
+        # Log failure message
+        $failureMessage = "[$(Get-Date)] Failed to update msExchHideFromAddressLists for user $userName. Error: $_"
+        Add-Content -Path $failureLogPath -Value $failureMessage
+    }
+}
