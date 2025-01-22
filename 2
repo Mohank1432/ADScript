@@ -32,3 +32,27 @@ foreach ($userName in $usernames) {
         Add-Content -Path $failureLogPath -Value $failureMessage
     }
 }
+
+Exception Request Details
+
+Exception Title
+
+Vulnerability Exception Request for Outdated .NET 6 Version on PI Servers
+
+Exception Description
+
+The PI servers in the current environment are running an outdated version of .NET 6, which is flagged as a vulnerability. These servers are scheduled for decommissioning by the end of March 2025, as they will be replaced by new servers. The new servers will adhere to the latest security and compliance standards, including updated .NET versions.
+
+Justification
+	1.	Short-term use: The existing PI servers will be operational only until March 2025, after which they will be decommissioned.
+	2.	Minimal risk: These servers are in a controlled environment with limited external exposure, minimizing the likelihood of exploitation.
+	3.	Resource constraints: Upgrading the .NET version on the current servers would require significant time and effort, which would divert resources from the ongoing migration to the new servers.
+
+Remediation Plan
+	1.	Controlled environment: Ensure the servers remain isolated and maintain strict access control.
+	2.	Monitoring: Continuously monitor the servers for any signs of vulnerabilities being exploited.
+	3.	Replacement timeline: Ensure the decommissioning of existing servers and deployment of new PI servers with updated .NET versions is completed by March 31, 2025.
+	4.	Review: Reassess the exception if the decommissioning timeline changes.
+
+Let me know if adjustments are needed!
+
