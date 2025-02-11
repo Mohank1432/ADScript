@@ -110,3 +110,81 @@ foreach ($User in $CorpUsers) {
         Write-Host "User $($User.SamAccountName) already exists in Stage domain, skipping..."
     }
 }
+
+
+
+
+# Define domain controllers
+$CorpDC = "CorpDC.domain.com"
+$StageDC = "StageDC.domain.com"
+
+# Define default password for new users in Stage domain (update as needed)
+$DefaultPassword = "P@ssw0rd123!" | ConvertTo-SecureString -AsPlainText -Force
+
+# List of users from Court domain to be replicated
+$CourtUsers = @("user1", "user2", "user3") # Replace with actual usernames
+
+# Fetch user attributes including OU path, company, and manager from Corp domain
+$CorpUsers = foreach ($User in $CourtUsers) {
+    $CorpUser = Get-ADUser -Identity $User -Server $CorpDC -Properties * 
+    $Manager = if ($CorpUser.Manager) { 
+        (Get-ADUser -Identity $CorpUser.Manager -Server $CorpDC).SamAccountName 
+    } else { 
+        $null 
+    }
+
+    [PSCustomObject]@{
+        SamAccountName   = $CorpUser.SamAccountName
+        Name             = $CorpUser.Name
+        GivenName        = $CorpUser.GivenName
+        Surname          = $CorpUser.Surname
+        UserPrincipalName= $CorpUser.UserPrincipalName
+        DisplayName      = $CorpUser.DisplayName
+        Department       = $CorpUser.Department
+        Title            = $CorpUser.Title
+        Enabled          = $CorpUser.Enabled
+        Description      = $CorpUser.Description
+        DistinguishedName= $CorpUser.DistinguishedName
+        Company          = $CorpUser.Company
+        Manager          = $Manager
+    }
+}
+
+# Replicate users in Stage domain with the same OU structure, company, and manager
+foreach ($User in $CorpUsers) {
+    # Extract the OU path from the Distinguished Name
+    $OUPath = ($User.DistinguishedName -split ",", 2)[1]
+
+    # Check if user already exists in Stage domain
+    $ExistingUser = Get-ADUser -Filter {SamAccountName -eq $User.SamAccountName} -Server $StageDC -ErrorAction SilentlyContinue
+    
+    if (-not $ExistingUser) {
+        # Create the user in Stage domain
+        New-ADUser -SamAccountName $User.SamAccountName `
+                   -Name $User.Name `
+                   -GivenName $User.GivenName `
+                   -Surname $User.Surname `
+                   -UserPrincipalName $User.UserPrincipalName `
+                   -DisplayName $User.DisplayName `
+                   -Department $User.Department `
+                   -Title $User.Title `
+                   -Enabled $User.Enabled `
+                   -Description $User.Description `
+                   -Company $User.Company `
+                   -Path $OUPath ` # Assigning the same OU path from Corp domain
+                   -Server $StageDC `
+                   -AccountPassword $DefaultPassword `
+                   -PasswordNeverExpires $true `
+                   -ChangePasswordAtLogon $true
+
+        # Set Manager if available
+        if ($User.Manager) {
+            Set-ADUser -Identity $User.SamAccountName -Manager $User.Manager -Server $StageDC
+        }
+
+        Write-Host "User $($User.SamAccountName) created in Stage domain under OU: $OUPath with default password, company, and manager."
+    } else {
+        Write-Host "User $($User.SamAccountName) already exists in Stage domain, skipping..."
+    }
+}
+
