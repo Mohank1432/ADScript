@@ -261,8 +261,141 @@ foreach ($User in $CorpUsers) {
 
         Write-Host "User $($User.SamAccountName) created in Stage domain under OU: $OUPath with default password, company, and manager."
     } else {
-        Write-Host "User $($User.SamAccountName) already exists in Stage domain, skipping..."
+        Write-Host "User $($User.SamAccountName) already exists in Stage domain, 
+
+
+
+
+
+# Define Corp domain controller
+$CorpDC = "CorpDC.domain.com"
+
+# List of SamAccountNames to fetch (replace with actual SamAccountNames)
+$CourtUsers = @("sam1", "sam2", "sam3")
+
+# Output CSV file
+$CSVPath = "C:\Temp\CorpUsers.csv"
+
+# Fetch user attributes and export to CSV
+$CorpUsers = foreach ($Sam in $CourtUsers) {
+    $CorpUser = Get-ADUser -Identity $Sam -Server $CorpDC -Properties * 
+    $Manager = if ($CorpUser.Manager) { 
+        (Get-ADUser -Identity $CorpUser.Manager -Server $CorpDC).SamAccountName 
+    } else { 
+        $null 
+    }
+
+    [PSCustomObject]@{
+        SamAccountName    = $CorpUser.SamAccountName
+        Name              = $CorpUser.Name
+        GivenName         = $CorpUser.GivenName
+        Surname           = $CorpUser.Surname
+        UserPrincipalName = $CorpUser.UserPrincipalName
+        DisplayName       = $CorpUser.DisplayName
+        Department        = $CorpUser.Department
+        Title             = $CorpUser.Title
+        Enabled           = $CorpUser.Enabled
+        Description       = $CorpUser.Description
+        DistinguishedName = $CorpUser.DistinguishedName
+        Company           = $CorpUser.Company
+        Manager           = $Manager
     }
 }
 
+# Export to CSV
+$CorpUsers | Export-Csv -Path $CSVPath -NoTypeInformation
+
+Write-Host "Exported $(($CorpUsers).Count) users to $CSVPath"
+
+
+
+
+
+-----------------
+
+
+# List of SamAccountNames to fetch (replace with actual SamAccountNames)
+$CourtUsers = @("sam1", "sam2", "sam3")
+
+# Output CSV file
+$CSVPath = "C:\Temp\CorpUsers.csv"
+
+# Fetch user attributes and export to CSV
+$CorpUsers = foreach ($Sam in $CourtUsers) {
+    $CorpUser = Get-ADUser -Identity $Sam -Properties * 
+    $Manager = if ($CorpUser.Manager) { 
+        (Get-ADUser -Identity $CorpUser.Manager).SamAccountName 
+    } else { 
+        $null 
+    }
+
+    [PSCustomObject]@{
+        SamAccountName    = $CorpUser.SamAccountName
+        Name              = $CorpUser.Name
+        GivenName         = $CorpUser.GivenName
+        Surname           = $CorpUser.Surname
+        UserPrincipalName = $CorpUser.UserPrincipalName
+        DisplayName       = $CorpUser.DisplayName
+        Department        = $CorpUser.Department
+        Title             = $CorpUser.Title
+        Enabled           = $CorpUser.Enabled
+        Description       = $CorpUser.Description
+        DistinguishedName = $CorpUser.DistinguishedName
+        Company           = $CorpUser.Company
+        Manager           = $Manager
+    }
+}
+
+# Export to CSV
+$CorpUsers | Export-Csv -Path $CSVPath -NoTypeInformation
+
+Write-Host "Exported $(($CorpUsers).Count) users to $CSVPath"
+
+
+
+# Default password for new users
+$DefaultPassword = "P@ssw0rd123!" | ConvertTo-SecureString -AsPlainText -Force
+
+# CSV file path (same as exported by the first script)
+$CSVPath = "C:\Temp\CorpUsers.csv"
+
+# Import users from CSV
+$Users = Import-Csv -Path $CSVPath
+
+# Create users in Stage domain
+foreach ($User in $Users) {
+    # Extract the OU path from the Distinguished Name
+    $OUPath = ($User.DistinguishedName -split ",", 2)[1]
+
+    # Check if user already exists in Stage domain
+    $ExistingUser = Get-ADUser -Filter {SamAccountName -eq $User.SamAccountName} -ErrorAction SilentlyContinue
+    
+    if (-not $ExistingUser) {
+        # Create the user in Stage domain
+        New-ADUser -SamAccountName $User.SamAccountName `
+                   -Name $User.Name `
+                   -GivenName $User.GivenName `
+                   -Surname $User.Surname `
+                   -UserPrincipalName $User.UserPrincipalName `
+                   -DisplayName $User.DisplayName `
+                   -Department $User.Department `
+                   -Title $User.Title `
+                   -Enabled $User.Enabled `
+                   -Description $User.Description `
+                   -Company $User.Company `
+                   -Path $OUPath ` # Assigning the same OU path from Corp domain
+                   -AccountPassword $DefaultPassword `
+                   -PasswordNeverExpires $true `
+                   -ChangePasswordAtLogon $true
+
+        # Set Manager if available
+        if ($User.Manager) {
+            Set-ADUser -Identity $User.SamAccountName -Manager $User.Manager
+        }
+
+        Write-Host "User $($User.SamAccountName) created in Stage domain under OU: $OUPath with specified password."
+    } else {
+        Write-Host "User $($User.SamAccountName) already exists in Stage domain, skipping..."
+    }
+}
 
