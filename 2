@@ -59,3 +59,54 @@ Let me know if adjustments are @⁨Udaykumar (Deloitte)⁩ @⁨~Mohanraj⁩ Have
 2. ⁠are Azure and AWS seed accounts vaulted in Privpass? 
 
 Need this information by 7am CT Monday for a meeting with the client. Pls send me response over an email. We can also have a quick call when one of you is available.
+
+
+
+
+
+# Define domain controllers
+$CorpDC = "CorpDC.domain.com"
+$StageDC = "StageDC.domain.com"
+
+# Define credentials (You may be prompted for credentials)
+$CorpCred = Get-Credential -Message "Enter credentials for Corp domain"
+$StageCred = Get-Credential -Message "Enter credentials for Stage domain"
+
+# List of users from Court domain to be replicated
+$CourtUsers = @("user1", "user2", "user3") # Replace with actual usernames
+
+# Fetch user attributes including OU path from Corp domain
+$CorpUsers = foreach ($User in $CourtUsers) {
+    Get-ADUser -Identity $User -Server $CorpDC -Credential $CorpCred -Properties * | 
+    Select-Object SamAccountName, Name, GivenName, Surname, UserPrincipalName, DisplayName, EmailAddress, Department, Title, Enabled, Description, DistinguishedName
+}
+
+# Replicate users in Stage domain with the same OU structure
+foreach ($User in $CorpUsers) {
+    # Extract the OU path from the Distinguished Name
+    $OUPath = ($User.DistinguishedName -split ",", 2)[1]
+
+    # Check if user already exists in Stage domain
+    $ExistingUser = Get-ADUser -Filter {SamAccountName -eq $User.SamAccountName} -Server $StageDC -Credential $StageCred -ErrorAction SilentlyContinue
+    
+    if (-not $ExistingUser) {
+        New-ADUser -SamAccountName $User.SamAccountName `
+                   -Name $User.Name `
+                   -GivenName $User.GivenName `
+                   -Surname $User.Surname `
+                   -UserPrincipalName $User.UserPrincipalName `
+                   -DisplayName $User.DisplayName `
+                   -EmailAddress $User.EmailAddress `
+                   -Department $User.Department `
+                   -Title $User.Title `
+                   -Enabled $User.Enabled `
+                   -Description $User.Description `
+                   -Path $OUPath ` # Assigning the same OU path from Corp domain
+                   -Server $StageDC `
+                   -Credential $StageCred
+
+        Write-Host "User $($User.SamAccountName) created in Stage domain under OU: $OUPath"
+    } else {
+        Write-Host "User $($User.SamAccountName) already exists in Stage domain, skipping..."
+    }
+}
