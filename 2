@@ -413,7 +413,7 @@ foreach ($User in $Users) {
             font-weight: bold;
             text-align: center;
             padding: 20px;
-            border: 2px solid red;
+     d       border: 2px solid red;
         }
         .banner a {
             color: red;
@@ -431,3 +431,12 @@ foreach ($User in $Users) {
 
 </body>
 </html>
+
+
+Subject: CyberArk Access Post-Migration
+
+Hi Vishu,
+
+Regarding yesterday’s query about users accessing CyberArk after migration, I have found a way to handle this. We can redirect the current CyberArk URL to a custom notice page, and if a specific URL string (e.g., /admin) is appended, it will follow the usual SAML authentication flow and grant access to the CyberArk application.
+
+This can be achieved using the URL Rewrite module in IIS. Let me know your thoughts on this approach. If we decide to proceed, we can install the module in the staging environment and conduct testing.
