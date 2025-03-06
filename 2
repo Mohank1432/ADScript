@@ -57,3 +57,198 @@ Write-Host "CSV file created at: $csvFilePath"
   <p>If not redirected, <a href="https://new-application-link.com">click here</a>.</p>
 </body>
 </html>
+
+
+
+
+
+
+
+Below is a final, consolidated Word document template that incorporates all previously shared information—including your System Integration Testing (SIT) details, the issues and resolutions, and the newly provided User Acceptance Testing (UAT) data. Copy and paste this into your Word file and adjust formatting (fonts, spacing, corporate branding) as needed.
+
+⸻
+
+[Company Name]
+
+BeyondTrust Password Safe
+SIT & UAT Testing Report
+Date: [Insert Date]
+
+⸻
+
+Table of Contents
+	1.	Executive Summary
+	2.	Introduction
+	3.	Scope of Testing
+	4.	Testing Methodology
+	1.	System Integration Testing (SIT)
+	2.	User Acceptance Testing (UAT)
+	5.	Key Findings & Results
+	1.	SIT Findings
+	2.	UAT Findings
+	6.	Issues Identified & Lessons Learned
+	7.	Resolutions and Recommendations
+	8.	Conclusion
+	9.	Appendices
+
+⸻
+
+1. Executive Summary
+
+This report summarizes the System Integration Testing (SIT) and User Acceptance Testing (UAT) conducted for the BeyondTrust Password Safe implementation. It highlights the testing scope, methodologies, key findings, issues identified, and recommended resolutions. Overall, the testing confirms that BeyondTrust Password Safe largely meets the defined requirements, with a few areas requiring follow-up and ongoing monitoring.
+
+⸻
+
+2. Introduction
+
+Purpose of the Document
+
+The purpose of this document is to present a comprehensive overview of the testing activities performed on BeyondTrust Password Safe. It includes the objectives, approach, findings, and resolutions identified during both SIT and UAT phases.
+
+Background
+
+BeyondTrust Password Safe is a privileged credential management solution. Ensuring it integrates seamlessly within the existing environment—and that it fulfills the organization’s security and operational requirements—is critical to maintaining a secure infrastructure.
+
+Objectives
+	•	Validate the technical and functional integration of BeyondTrust Password Safe with existing systems (SIT).
+	•	Confirm that the solution meets business requirements and user expectations (UAT).
+	•	Identify any issues or deficiencies in functionality, security, or usability.
+	•	Recommend resolutions and enhancements to address identified issues.
+
+Document Structure
+
+This report is organized to first outline the testing scope and methodology, then provide detailed findings and results, issues identified, resolutions, and recommendations. The conclusion summarizes the readiness of the solution for deployment.
+
+⸻
+
+3. Scope of Testing
+	•	System Integration Testing (SIT):
+Focused on verifying integrations between BeyondTrust Password Safe and relevant systems (e.g., on-premises Active Directory, Azure AD, or other authentication providers).
+	•	User Acceptance Testing (UAT):
+Evaluated real-world scenarios and business processes, involving actual end-users and subject matter experts.
+
+⸻
+
+4. Testing Methodology
+
+4.1 System Integration Testing (SIT)
+	•	Environment & Tools:
+Conducted in controlled test environments with relevant tools to simulate production-like conditions.
+	•	Test Cases & Coverage:
+Included API integrations, user provisioning, authentication workflows, and data synchronization between Azure AD/on-prem AD and Password Safe.
+	•	Execution & Tracking:
+Used a standardized test management process to record and track each test case’s pass/fail status.
+
+4.2 User Acceptance Testing (UAT)
+	•	Participants & Roles:
+	•	Total Nominated Testers: 20
+	•	3 testers did not complete the survey.
+	•	Under Scott Traverse: 1 Tester
+	•	Under Tommy Hitt: 2 Testers
+	•	Business Unit / Director:
+	•	Scott Traverse (Manufacturing, CAPE)
+	•	Tommy Hitt (Global Field Operations)
+	•	Test Scenarios:
+UAT aimed to validate that BeyondTrust Password Safe meets business needs and user requirements, including usability, performance, and overall satisfaction.
+	•	Feedback & Iteration:
+User feedback was collected via surveys and follow-up discussions. Issues identified were logged, and minor fixes were implemented promptly.
+
+⸻
+
+5. Key Findings & Results
+
+5.1 SIT Findings
+	•	Scope:
+Verified the integration of various modules to ensure they work together as expected.
+	•	Results:
+	•	Of 18 test cases (for SAs and Secrets Safe), 15 members successfully completed the SA account use case, and 3 members successfully completed the Secrets Safe use case.
+
+5.2 UAT Findings
+	•	Validation Success Rate:
+Out of 20 identified UAT testers, 16 completed validation successfully.
+	•	User Satisfaction:
+Feedback indicates high satisfaction with system usability and performance.
+	•	Remaining Gaps:
+Three testers did not complete the UAT survey, so their feedback is pending.
+	•	Overall Conclusion:
+UAT confirms that the system meets use-case requirements and business needs, demonstrating strong user satisfaction.
+
+⸻
+
+6. Issues Identified & Lessons Learned
+	1.	Data Synchronization Between Azure & On-Prem AD
+	•	Issue: Inconsistent synchronization caused certain user accounts to fail integration.
+	•	Action: Impacted users were moved to the appropriate OU to streamline synchronization.
+	2.	Delayed Account Visibility
+	•	Issue: It takes approximately 30 minutes for a user to see a newly requested account in Password Safe.
+	•	Status: Investigation in progress; exploring process or configuration optimizations.
+	3.	Multiple Owners on a Single Account
+	•	Issue: When multiple owners were assigned, the system occasionally encountered delays or errors.
+	•	Mitigation: Restrict requests to a single owner where possible, pending a long-term fix.
+	4.	User Account Creation Collisions
+	•	Issue: Some users were created via on-prem AD and others via HRSL1, leading to domain collisions during authentication.
+	•	Resolution: Standardize naming conventions and align user provisioning processes to avoid collisions.
+	5.	Minor Issues and Feedback
+	•	Observation: Additional minor issues were resolved before UAT began, and lessons learned were documented for future reference.
+
+⸻
+
+7. Resolutions and Recommendations
+	1.	Enhance Synchronization Processes
+	•	Optimize synchronization schedules and OU structures to reduce integration errors.
+	2.	Reduce Delayed Account Visibility
+	•	Investigate polling intervals, caching mechanisms, or workflow adjustments to shorten the 30-minute delay.
+	3.	Refine Ownership Assignment
+	•	Encourage single-owner requests to avoid concurrency issues.
+	•	If multiple owners are necessary, develop a robust procedure to handle concurrent requests.
+	4.	Standardize Provisioning
+	•	Align all user creation (on-prem AD, HR, Azure) with a single naming convention and clear policies.
+	•	Implement checks or automation scripts to detect collisions early.
+	5.	Ongoing Monitoring & Feedback Loop
+	•	Maintain a tracking system for minor issues.
+	•	Encourage consistent user feedback for continuous improvement.
+
+⸻
+
+8. Conclusion
+
+The SIT and UAT efforts confirm that BeyondTrust Password Safe is functionally sound, integrates well with existing systems, and meets most user requirements. Although a few issues remain—such as synchronization delays and account ownership conflicts—resolutions are either in place or actively being developed. With continued monitoring and minor adjustments, the solution is expected to be ready for production deployment.
+
+UAT results show high user satisfaction with system usability and performance. This further indicates that BeyondTrust Password Safe effectively addresses the organization’s privileged credential management needs.
+
+⸻
+
+9. Appendices
+
+Appendix A: Detailed Test Cases
+
+Include a table or spreadsheet listing all test cases, expected outcomes, actual results, pass/fail status, and any relevant notes.
+
+Appendix B: Test Logs & Screenshots
+
+Attach system logs, screenshots, or additional documentation that validate and support the testing outcomes.
+
+Appendix C: Change Requests & Tracking
+
+Provide references to any change requests raised during SIT/UAT, along with their current status and any relevant tracking information.
+
+⸻
+
+Prepared By:
+[Your Name]
+[Your Title / Role]
+[Date]
+
+Approved By:
+[Approver’s Name]
+[Approver’s Title / Role]
+[Date]
+
+⸻
+
+Final Formatting Notes
+	•	Apply consistent font styles (e.g., Calibri, Arial) and spacing.
+	•	Include your company’s branding (logos, headers/footers, etc.) if desired.
+	•	Use version control and document any changes or updates made after review.
+
+This finalized document incorporates all key points from your SIT and UAT testing, including the newly provided UAT participant and feedback details. Feel free to modify any section to align with your internal reporting standards.
