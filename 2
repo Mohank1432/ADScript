@@ -1,3 +1,44 @@
+# Input and Output file paths
+$inputFile = "C:\Path\To\ServiceAccounts.txt"   # Update with the actual file path
+$outputFile = "C:\Path\To\AccountGroups.csv"    # Update with the desired output file path
+
+# Check if input file exists
+if (-Not (Test-Path $inputFile)) {
+    Write-Host "Input file not found: $inputFile"
+    exit
+}
+
+# Initialize output file with headers
+"ServiceAccount,Group" | Out-File -FilePath $outputFile
+
+# Import Active Directory module
+Import-Module ActiveDirectory
+
+# Read service accounts from input file
+$serviceAccounts = Get-Content $inputFile
+
+# Process each service account
+foreach ($account in $serviceAccounts) {
+    # Get groups where the service account is a member
+    $groups = Get-ADUser -Identity $account -Property MemberOf -ErrorAction SilentlyContinue | Select-Object -ExpandProperty MemberOf
+
+    # If groups exist, write to the output file
+    if ($groups) {
+        foreach ($group in $groups) {
+            "$account,$group" | Out-File -FilePath $outputFile -Append
+        }
+    } else {
+        "$account,No Groups Found" | Out-File -FilePath $outputFile -Append
+    }
+}
+
+Write-Host "Script execution completed. Output saved to $outputFile"
+
+
+
+
+
+
 # Define groups
 $denyGroup = "Deny Group"
 $internetGroups = @("Internet1", "Internet3", "Internet4", "Internet5")
