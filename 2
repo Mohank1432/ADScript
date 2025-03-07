@@ -252,3 +252,43 @@ Final Formatting Notes
 	•	Use version control and document any changes or updates made after review.
 
 This finalized document incorporates all key points from your SIT and UAT testing, including the newly provided UAT participant and feedback details. Feel free to modify any section to align with your internal reporting standards.
+
+
+
+
+
+# Input and Output file paths
+$inputFile = "C:\Path\To\ServiceAccounts.txt"   # Update with the actual file path
+$outputFile = "C:\Path\To\AccountMembers.csv"  # Update with the desired output file path
+
+# Check if input file exists
+if (-Not (Test-Path $inputFile)) {
+    Write-Host "Input file not found: $inputFile"
+    exit
+}
+
+# Initialize output file
+"ServiceAccount,Member" | Out-File -FilePath $outputFile
+
+# Import Active Directory module (ensure it's installed)
+Import-Module ActiveDirectory
+
+# Read service accounts from input file
+$serviceAccounts = Get-Content $inputFile
+
+# Process each service account
+foreach ($account in $serviceAccounts) {
+    # Get members of the service account
+    $members = Get-ADGroupMember -Identity $account -ErrorAction SilentlyContinue
+
+    # If members exist, write to the output file
+    if ($members) {
+        foreach ($member in $members) {
+            "$account,$($member.Name)" | Out-File -FilePath $outputFile -Append
+        }
+    } else {
+        "$account,No Members Found" | Out-File -FilePath $outputFile -Append
+    }
+}
+
+Write-Host "Script execution completed. Output saved to $outputFile"
