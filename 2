@@ -1,3 +1,16 @@
+SELECT *  
+FROM UserTable  
+WHERE (CustomProperty56 IS NOT NULL AND CustomProperty56 <> '' AND (CustomProperty57 IS NULL OR CustomProperty57 = ''))  
+   OR (CustomProperty57 IS NOT NULL AND CustomProperty57 <> '' AND (CustomProperty56 IS NULL OR CustomProperty56 = ''))  
+   OR (CustomProperty56 IS NOT NULL AND CustomProperty56 <> '' AND CustomProperty57 IS NOT NULL AND CustomProperty57 <> '');
+
+
+
+
+
+
+
+
 Here’s a Deployment Guide for configuring the IIS URL Rewrite Module using the IIS Manager UI, instead of manually editing the web.config file.
 
 ⸻
