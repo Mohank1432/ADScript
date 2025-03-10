@@ -1,3 +1,200 @@
+Here’s a Deployment Guide for configuring the IIS URL Rewrite Module using the IIS Manager UI, instead of manually editing the web.config file.
+
+⸻
+
+Deployment Guide for IIS URL Rewrite - Redirecting Deprecated Login Page
+
+1. Introduction
+
+1.1 Purpose
+
+This document provides step-by-step instructions to configure IIS URL Rewrite through the IIS Manager UI. The rule will:
+	•	Redirect non-admin users accessing www.cyber.com/psweb/login to www.cyber.com/deprecated.html.
+	•	Allow admin users to access www.cyber.com/psweb/login?admin=123 without redirection.
+	•	Prevent infinite redirect loops.
+
+⸻
+
+2. Prerequisites
+
+Before implementing the rewrite rule, ensure:
+	•	IIS is installed and running.
+	•	Administrator access to modify the web server configuration.
+	•	A backup of IIS settings is taken before making changes.
+
+⸻
+
+3. Backup Plan
+
+3.1 Backup IIS Configuration
+	1.	Open Command Prompt as Administrator.
+	2.	Run the following command to create a backup of IIS settings:
+
+%windir%\system32\inetsrv\appcmd add backup PreRewriteBackup
+
+
+	3.	Verify the backup was created by running:
+
+%windir%\system32\inetsrv\appcmd list backup
+
+
+	4.	Proceed with the deployment after confirming a successful backup.
+
+⸻
+
+4. Configuration Steps
+
+4.1 Install IIS URL Rewrite Module (If Not Installed)
+	1.	Download the IIS URL Rewrite Module from the Microsoft Download Center.
+	2.	Run the installer and follow the on-screen instructions.
+	3.	Restart IIS after installation:
+
+iisreset
+
+
+
+4.2 Open IIS Manager
+	1.	Open IIS Manager (inetmgr).
+	2.	In the left-hand panel, expand the server name and navigate to the application that contains psweb/login.
+	3.	Click on the application where the rewrite rule should be applied.
+
+4.3 Open the URL Rewrite Module
+	1.	In the Features View, double-click URL Rewrite.
+	2.	Click “Add Rules…” in the right-hand Actions pane.
+	3.	In the Add Rules window, select Blank Rule, then click OK.
+
+4.4 Configure the Rule for Redirecting Non-Admin Users
+	1.	In the Edit Inbound Rule window, enter a name for the rule (e.g., Redirect Non-Admin Users).
+	2.	In the Match URL section:
+	•	Set Requested URL to Matches the Pattern.
+	•	Set Using to Regular Expressions.
+	•	Enter the following pattern:
+
+^psweb/login$
+
+
+
+4.5 Add Conditions to Exclude Admin Users and Prevent Loop
+	1.	Under the Conditions section, click Add….
+	2.	In the Condition Input field, select {REQUEST_URI}.
+	•	Set Check if input string to Does Not Match the Pattern.
+	•	Enter the pattern:
+
+deprecated\.html
+
+
+	•	Click OK.
+
+	3.	Click Add… again to add another condition.
+	4.	In the Condition Input field, select {QUERY_STRING}.
+	•	Set Check if input string to Does Not Match the Pattern.
+	•	Enter the pattern:
+
+admin=123
+
+
+	•	Click OK.
+
+4.6 Set the Redirect Action
+	1.	In the Action section, set Action Type to Redirect.
+	2.	In the Redirect URL field, enter:
+
+/deprecated.html
+
+
+	3.	Set Redirect type to Found (302) (or Permanent (301) if needed).
+	4.	Click Apply in the right-hand Actions pane to save the rule.
+
+⸻
+
+5. Validate the Configuration
+
+5.1 Restart IIS
+	1.	Open Command Prompt as Administrator.
+	2.	Run the command:
+
+iisreset
+
+
+
+5.2 Test Redirect Behavior
+	1.	Open a web browser and enter:
+
+http://www.cyber.com/psweb/login
+
+	•	It should redirect to www.cyber.com/deprecated.html.
+
+	2.	Enter the admin URL with a query string:
+
+http://www.cyber.com/psweb/login?admin=123
+
+	•	It should allow access to the login page.
+
+⸻
+
+6. Rollback Plan
+
+If any issues arise after deployment, follow these steps to roll back to the previous configuration.
+
+6.1 Restore IIS Configuration Backup
+	1.	Open Command Prompt as Administrator.
+	2.	Run the following command to restore IIS settings:
+
+%windir%\system32\inetsrv\appcmd restore backup PreRewriteBackup
+
+
+	3.	Restart IIS using:
+
+iisreset
+
+
+	4.	Verify the application behavior.
+
+6.2 Delete the URL Rewrite Rule (If Needed)
+	1.	Open IIS Manager (inetmgr).
+	2.	Navigate to the application where the rule was applied.
+	3.	Open URL Rewrite.
+	4.	Select the Redirect Non-Admin Users rule.
+	5.	Click Remove in the right-hand Actions pane.
+	6.	Restart IIS.
+
+⸻
+
+7. Troubleshooting
+
+Issue	Cause	Resolution
+Redirect loop occurs	Missing condition to exclude deprecated.html	Ensure {REQUEST_URI} condition is added
+Admin URL is still redirected	Query string check is incorrect	Verify admin=123 condition is set correctly
+Changes not applied	IIS cache issue	Restart IIS using iisreset
+
+
+
+⸻
+
+8. Conclusion
+
+By following this guide, IIS will correctly redirect non-admin users while allowing admin users to proceed. This ensures proper access control without infinite redirect loops.
+
+⸻
+
+File Name Suggestion
+
+Deployment Guide - IIS URL Rewrite for Login Redirection.docx
+
+⸻
+
+This version now includes detailed steps for configuring the rule through the IIS Manager UI instead of manually editing the web.config file. Let me know if you need any modifications!
+
+
+
+
+
+
+
+
+
+
+
 # Input and Output file paths
 $inputFile = "C:\Path\To\ServiceAccounts.txt"   # Update with the actual file path
 $outputFile = "C:\Path\To\AccountGroups.csv"    # Update with the desired output file path
