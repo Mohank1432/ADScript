@@ -1,3 +1,61 @@
+# Define input and output file paths
+$InputFile = "C:\Temp\AD_Accounts.txt"   # File containing SAMAccountNames (one per line)
+$OutputFile = "C:\Temp\AD_Inheritance_Results.txt"
+$ErrorLog = "C:\Temp\AD_Inheritance_Errors.txt"
+
+# Check if input file exists
+if (-Not (Test-Path $InputFile)) {
+    Write-Host "Input file not found at $InputFile"
+    exit
+}
+
+# Clear previous results
+if (Test-Path $OutputFile) { Clear-Content $OutputFile }
+if (Test-Path $ErrorLog) { Clear-Content $ErrorLog }
+
+# Process each account in the input file
+foreach ($SAMAccountName in Get-Content $InputFile) {
+    $SAMAccountName = $SAMAccountName.Trim()
+    
+    if ($SAMAccountName -ne "") {
+        try {
+            # Get the distinguished name (DN) of the AD object
+            $ADObject = Get-ADUser -Identity $SAMAccountName -Properties DistinguishedName -ErrorAction Stop | Select-Object -ExpandProperty DistinguishedName
+            
+            # Get the security descriptor of the AD object
+            $Acl = Get-Acl -Path "AD:$ADObject" -ErrorAction Stop
+
+            # Check inheritance status
+            if ($Acl.AreAccessRulesProtected -eq $false) {
+                $Result = "$SAMAccountName - Inheritance is ENABLED"
+            } else {
+                $Result = "$SAMAccountName - Inheritance is DISABLED"
+            }
+
+            # Write result to output file
+            $Result | Out-File -FilePath $OutputFile -Append
+            Write-Host $Result
+
+        } catch {
+            # Log errors separately
+            $ErrorMessage = "$SAMAccountName - Error: $_"
+            $ErrorMessage | Out-File -FilePath $ErrorLog -Append
+            Write-Host $ErrorMessage -ForegroundColor Red
+        }
+    }
+}
+
+Write-Host "Results saved to $OutputFile"
+Write-Host "Errors saved to $ErrorLog (if any)"
+
+
+
+
+
+
+
+
+
 
 # Input and Output File Paths
 $inputFile = "C:\Path\To\accounts.txt"  # Update this path
