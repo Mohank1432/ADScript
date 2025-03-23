@@ -1,1 +1,43 @@
 
+# Input and Output File Paths
+$inputFile = "C:\Path\To\accounts.txt"  # Update this path
+$outputFile = "C:\Path\To\AD_OU_Report.csv"  # Update this path
+
+# Check if input file exists
+if (-Not (Test-Path $inputFile)) {
+    Write-Host "Input file not found!"
+    exit
+}
+
+# Initialize an array to store results
+$results = @()
+
+# Read usernames from the input file
+$users = Get-Content $inputFile
+
+foreach ($user in $users) {
+    # Get user details from AD
+    $adUser = Get-ADUser -Identity $user -Properties DistinguishedName -ErrorAction SilentlyContinue
+
+    if ($adUser) {
+        # Extract OU from DistinguishedName
+        $ou = ($adUser.DistinguishedName -replace '^CN=.*?,','')
+
+        # Store results in an object
+        $results += [PSCustomObject]@{
+            Username = $user
+            OU = $ou
+        }
+    } else {
+        # Store not found users
+        $results += [PSCustomObject]@{
+            Username = $user
+            OU = "Not Found"
+        }
+    }
+}
+
+# Export results to CSV
+$results | Export-Csv -Path $outputFile -NoTypeInformation
+
+Write-Host "OU information exported to $outputFile"
