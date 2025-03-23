@@ -214,3 +214,58 @@ if ($ADObject) {
 } else {
     Write-Host "AD object not found!"
 }
+
+
+
+
+
+
+
+
+
+
+
+# Define input and output file paths
+$InputFile = "C:\Temp\AD_Accounts.txt"  # File containing SAMAccountNames (one per line)
+$OutputFile = "C:\Temp\AD_Inheritance_Results.txt"
+
+# Check if input file exists
+if (-Not (Test-Path $InputFile)) {
+    Write-Host "Input file not found at $InputFile"
+    exit
+}
+
+# Clear output file before writing new results
+if (Test-Path $OutputFile) {
+    Clear-Content $OutputFile
+}
+
+# Process each account in the input file
+foreach ($SAMAccountName in Get-Content $InputFile) {
+    $SAMAccountName = $SAMAccountName.Trim()
+    
+    if ($SAMAccountName -ne "") {
+        # Get the distinguished name (DN) of the AD object
+        $ADObject = Get-ADUser -Identity $SAMAccountName -Properties DistinguishedName -ErrorAction SilentlyContinue | Select-Object -ExpandProperty DistinguishedName
+
+        if ($ADObject) {
+            # Get the security descriptor of the AD object
+            $Acl = Get-Acl -Path "AD:$ADObject"
+
+            # Check inheritance status
+            if ($Acl.AreAccessRulesProtected -eq $false) {
+                $Result = "$SAMAccountName - Inheritance is ENABLED"
+            } else {
+                $Result = "$SAMAccountName - Inheritance is DISABLED"
+            }
+        } else {
+            $Result = "$SAMAccountName - Account not found"
+        }
+
+        # Append result to output file
+        $Result | Out-File -FilePath $OutputFile -Append
+        Write-Host $Result
+    }
+}
+
+Write-Host "Results saved to $OutputFile"
