@@ -175,3 +175,42 @@ foreach ($user in $users) {
 $results | Export-Csv -Path $outputFile -NoTypeInformation
 
 Write-Host "User details exported to $outputFile"
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Prompt for the AD object name
+$ADObjectName = Read-Host "Enter the SAMAccountName of the AD object"
+
+# Get the distinguished name (DN) of the AD object
+$ADObject = Get-ADUser -Identity $ADObjectName -Properties DistinguishedName | Select-Object -ExpandProperty DistinguishedName
+
+if ($ADObject) {
+    # Get the security descriptor of the AD object
+    $Acl = Get-Acl -Path "AD:$ADObject"
+
+    # Check inheritance status
+    if ($Acl.AreAccessRulesProtected -eq $false) {
+        $Result = "Inheritance is ENABLED for $ADObject"
+    } else {
+        $Result = "Inheritance is DISABLED for $ADObject"
+    }
+
+    # Output file path
+    $OutputFile = "C:\Temp\AD_Inheritance_Check.txt"
+
+    # Write result to file
+    $Result | Out-File -FilePath $OutputFile -Append
+    Write-Host "Result saved to $OutputFile"
+} else {
+    Write-Host "AD object not found!"
+}
