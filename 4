@@ -1,4 +1,60 @@
 # Define input and output file paths
+$InputFile = "C:\Temp\ServiceAccounts.txt"  # Text file with service account names (one per line)
+$OutputFile = "C:\Temp\ServiceAccountDetails.csv"  # Output CSV file
+
+# Read service account names from the input file
+$ServiceAccounts = Get-Content $InputFile
+
+# Initialize an array to store results
+$Results = @()
+
+# Loop through each service account and fetch properties
+foreach ($ServiceAccount in $ServiceAccounts) {
+    $ADUser = Get-ADUser -Identity $ServiceAccount -Properties SamAccountName, Name, UserPrincipalName, Enabled, Mail, LastLogonDate, Manager, PasswordLastSet, WhenCreated -ErrorAction SilentlyContinue
+    
+    if ($ADUser) {
+        # Store the properties in an object
+        $Results += [PSCustomObject]@{
+            SamAccountName  = $ADUser.SamAccountName
+            Name            = $ADUser.Name
+            UserPrincipalName = $ADUser.UserPrincipalName
+            Enabled         = $ADUser.Enabled
+            Mail            = $ADUser.Mail
+            LastLogonDate   = $ADUser.LastLogonDate
+            Manager         = $ADUser.Manager
+            PasswordLastSet = $ADUser.PasswordLastSet
+            WhenCreated     = $ADUser.WhenCreated
+        }
+    } else {
+        # Handle cases where the service account is not found
+        $Results += [PSCustomObject]@{
+            SamAccountName  = $ServiceAccount
+            Name            = "Not Found"
+            UserPrincipalName = "Not Found"
+            Enabled         = "Not Found"
+            Mail            = "Not Found"
+            LastLogonDate   = "Not Found"
+            Manager         = "Not Found"
+            PasswordLastSet = "Not Found"
+            WhenCreated     = "Not Found"
+        }
+    }
+}
+
+# Export results to CSV
+$Results | Export-Csv -Path $OutputFile -NoTypeInformation
+
+Write-Host "Export completed: $OutputFile"
+
+
+
+
+
+
+
+
+
+# Define input and output file paths
 $InputFile = "C:\Temp\AD_Accounts.txt"   # File containing SAMAccountNames (one per line)
 $OutputFile = "C:\Temp\AD_Inheritance_Results.txt"
 $ErrorLog = "C:\Temp\AD_Inheritance_Errors.txt"
