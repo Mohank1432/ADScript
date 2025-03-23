@@ -41,3 +41,67 @@ foreach ($user in $users) {
 $results | Export-Csv -Path $outputFile -NoTypeInformation
 
 Write-Host "OU information exported to $outputFile"
+
+
+
+
+
+
+
+
+
+
+# Input and Output File Paths
+$inputFile = "C:\Path\To\accounts.txt"  # Update this path
+$outputFile = "C:\Path\To\AD_User_Report.csv"  # Update this path
+
+# Check if input file exists
+if (-Not (Test-Path $inputFile)) {
+    Write-Host "Input file not found!"
+    exit
+}
+
+# Initialize an array to store results
+$results = @()
+
+# Read SamAccountNames from the input file
+$users = Get-Content $inputFile
+
+foreach ($user in $users) {
+    # Get user details from AD
+    $adUser = Get-ADUser -Identity $user -Properties DistinguishedName, SamAccountName, Name, UserPrincipalName, Enabled, Mail, LastLogonDate, Modified -ErrorAction SilentlyContinue
+
+    if ($adUser) {
+        # Extract OU from DistinguishedName
+        $ou = ($adUser.DistinguishedName -replace '^CN=.*?,','')
+
+        # Store results in an object
+        $results += [PSCustomObject]@{
+            SamAccountName   = $adUser.SamAccountName
+            Name             = $adUser.Name
+            UserPrincipalName = $adUser.UserPrincipalName
+            Enabled          = $adUser.Enabled
+            Mail             = $adUser.Mail
+            LastLogon        = $adUser.LastLogonDate
+            LastModified     = $adUser.Modified
+            OU               = $ou
+        }
+    } else {
+        # Store not found users
+        $results += [PSCustomObject]@{
+            SamAccountName   = $user
+            Name             = "Not Found"
+            UserPrincipalName = "Not Found"
+            Enabled          = "Not Found"
+            Mail             = "Not Found"
+            LastLogon        = "Not Found"
+            LastModified     = "Not Found"
+            OU               = "Not Found"
+        }
+    }
+}
+
+# Export results to CSV
+$results | Export-Csv -Path $outputFile -NoTypeInformation
+
+Write-Host "User details exported to $outputFile"
