@@ -2,6 +2,11 @@ The Privileged Access Management (PAM) solution has been upgraded from PrivPass 
 
 
 
+index=your_index source="WinEventLog:Security" (EventCode=4723 OR EventCode=4724) 
+| search Account_Name="john.doe"
+| table _time, EventCode, Account_Name, Subject_Account_Name, Workstation_Name, Logon_ID
+
+
 
 What Could AutoResolve AI Do?
 Imagine an AI agent that:
