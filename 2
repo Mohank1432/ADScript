@@ -6,7 +6,20 @@ index=your_index source="WinEventLog:Security" (EventCode=4723 OR EventCode=4724
 | search Account_Name="john.doe"
 | table _time, EventCode, Account_Name, Subject_Account_Name, Workstation_Name, Logon_ID
 
+index=your_index source="WinEventLog:Security" (EventCode=4723 OR EventCode=4724)
+| search Account_Name="john.doe"
+| eval Action=case(EventCode==4723, "User-Initiated Password Change", 
+                   EventCode==4724, "Admin-Reset Password")
+| table _time, Action, Account_Name, Subject_Account_Name, Workstation_Name, Logon_ID, Source_Network_Address
 
+
+If you want to check whether the user logged in after the password change, correlate it with Event ID 4624 (successful login):
+
+
+index=your_index source="WinEventLog:Security" (EventCode=4723 OR EventCode=4724 OR EventCode=4624)
+| search Account_Name="john.doe"
+| transaction Account_Name maxspan=10m
+| table _time, EventCode, Action, Account_Name, Subject_Account_Name, Workstation_Name, Logon_ID, Source_Network_Address
 
 What Could AutoResolve AI Do?
 Imagine an AI agent that:
