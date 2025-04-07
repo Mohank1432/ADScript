@@ -1,1 +1,6 @@
-
+index=your_index_name sourcetype=WinEventLog:Security (EventCode=4723 OR EventCode=4724)
+| rename SubjectLogonId as logon_id
+| join logon_id [ search index=your_index_name sourcetype=WinEventLog:Security EventCode=4624 
+  | rename SubjectLogonId as logon_id 
+  | table logon_id SourceNetworkAddress ]
+| table _time EventCode TargetUserName SubjectUserName SourceNetworkAddress
