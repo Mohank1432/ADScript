@@ -1,3 +1,21 @@
+index=* sourcetype="WinEventLog:Security" EventCode=4723 cyberspace1
+| eval user=coalesce(Account_Name, Target_Account_Name, User_Name)
+| fields _time, user, host, EventCode, Message
+| table _time, user, host, EventCode, Message
+| rename _time as "Password Change Time", host as "Domain Controller"
+
+
+
+
+
+
+
+
+
+
+
+
+
 index=wineventlog sourcetype="WinEventLog:Security" EventCode=4723 (Account_Name="cyberspace1" OR Target_Account_Name="cyberspace1")
 | eval user=coalesce(Account_Name, Target_Account_Name)
 | fields _time, user, host, EventCode, Message
