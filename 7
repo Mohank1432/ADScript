@@ -27,3 +27,17 @@ index=* sourcetype="WinEventLog:Security" (EventCode=4723 OR EventCode=4624) cyb
 | eval Password_Change_Time=strftime(_time, "%Y-%m-%d %H:%M:%S")
 | table Password_Change_Time, user, ip_address, host, EventCode, Message
 | rename host as "Domain Controller"
+
+
+
+
+
+index=* sourcetype="WinEventLog:Security" (EventCode=4723 OR EventCode=4624) cyberspace1
+| eval user=coalesce(Account_Name, Target_Account_Name, User_Name)
+| eval ip_address=coalesce(Source_Network_Address, Network_Address, Workstation_IP, src_ip, Caller_IP_Address)
+| eval ip_address=if(isnull(ip_address), rex field=_raw "(?i)Address:\s*(?<ip_address>\d+\.\d+\.\d+\.\d+)", ip_address)
+| transaction user maxspan=5m
+| where EventCode=4723
+| eval Password_Change_Time=strftime(_time - (6 * 3600), "%Y-%m-%d %I:%M:%S %p")
+| table Password_Change_Time, user, ip_address, host, EventCode, Message
+| rename host as "Domain Controller"
