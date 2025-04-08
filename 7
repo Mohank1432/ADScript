@@ -1,0 +1,29 @@
+index=* sourcetype="WinEventLog:Security" EventCode=4723 cyberspace1
+| eval user=coalesce(Account_Name, Target_Account_Name, User_Name)
+| eval Password_Change_Time=strftime(_time, "%Y-%m-%d %H:%M:%S")
+| fields Password_Change_Time, user, host, EventCode, Message
+| table Password_Change_Time, user, host, EventCode, Message
+| rename host as "Domain Controller"
+
+
+index=* sourcetype="WinEventLog:Security" EventCode=4723 cyberspace1
+| eval user=coalesce(Account_Name, Target_Account_Name, User_Name)
+| eval Password_Change_Time=strftime(_time, "%Y-%m-%d %H:%M:%S")
+| fields Password_Change_Time, user, host, EventCode, Message
+| join host, user max=0
+    [ search index=* sourcetype="WinEventLog:Security" EventCode=4624 cyberspace1 Logon_Type=2 OR Logon_Type=10
+    | eval ip_address=coalesce(Source_Network_Address, Network_Address, Workstation_IP)
+    | fields _time, host, user, ip_address ]
+| table Password_Change_Time, user, ip_address, host, EventCode, Message
+| rename host as "Domain Controller"
+
+
+
+index=* sourcetype="WinEventLog:Security" (EventCode=4723 OR EventCode=4624) cyberspace1
+| eval user=coalesce(Account_Name, Target_Account_Name, User_Name)
+| eval ip_address=coalesce(Source_Network_Address, Network_Address, Workstation_IP)
+| transaction user maxspan=5m
+| where EventCode=4723
+| eval Password_Change_Time=strftime(_time, "%Y-%m-%d %H:%M:%S")
+| table Password_Change_Time, user, ip_address, host, EventCode, Message
+| rename host as "Domain Controller"
