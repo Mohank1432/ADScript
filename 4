@@ -1,106 +1,158 @@
 Import-Module ActiveDirectory
 
-# ==== Variables to Adjust Easily ====
+# ====== Configuration ======
 $outputPath = "C:\Temp\AD_Users_Output.csv"
-$logPath = "C:\Temp\AD_Users_Script.log"
+$logPath    = "C:\Temp\AD_Users_Script.log"
 $groupsToCheck = @("phase1", "phase2", "inscope")
 $ldapFilter = "(&(objectCategory=person)(objectClass=user))"
+# ===========================
 
-# ==== Cache lookups ====
+function Write-Log {
+    param($msg, $level="INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "[$timestamp][$level] $msg"
+    Add-Content -Path $logPath -Value $line
+    Write-Host $line
+}
+
+# ====== Script Start ======
+Remove-Item $logPath -ErrorAction SilentlyContinue
+Write-Log "SCRIPT STARTED"
+
+# 1. Reference groups
 $groupInfo = @{}
-foreach ($g in $groupsToCheck) {
-    $group = Get-ADGroup -Identity $g -ErrorAction SilentlyContinue
-    if ($group) { $groupInfo[$g] = $group.DistinguishedName }
+foreach ($group in $groupsToCheck) {
+    Write-Log "Looking for group '$group'..."
+    $groupObj = Get-ADGroup -Identity $group -ErrorAction SilentlyContinue
+    if ($groupObj) {
+        $groupInfo[$group] = $groupObj.DistinguishedName
+        Write-Log "Found group: $group"
+    } else {
+        Write-Log "Group '$group' not found!" "WARN"
+    }
 }
 
-# Bulk get all users
-$users = Get-ADUser -LDAPFilter $ldapFilter -Properties samaccountname, manager, whencreated, pwdlastset, memberOf
+# 2. User query
+Write-Log "Querying users with LDAP filter: $ldapFilter"
+$users = Get-ADUser -LDAPFilter $ldapFilter -Properties samaccountname,manager,whenCreated,pwdlastset,memberOf
+Write-Log ("Found {0} users." -f $users.Count)
 
-# ==== Cache all _RW and _RO groups and their members ====
-$allRWROGroups = @{}
-$allRWROGroupMgrs = @{}
-$allRWROGroupMembers = @{}
-
-# Precompute RW and RO group names for all users
+# 3. Prepare _RW / _RO group lists (with caching)
+Write-Log "Indexing all target _RW and _RO groups for users..."
+$allGroupNames = @{}
 foreach ($user in $users) {
-    foreach ($suffix in @("_RW", "_RO")) {
-        $grpName = $user.samaccountname + $suffix
-        $allRWROGroups[$grpName] = $null
+    foreach ($suff in @("_RW", "_RO")) {
+        $gn = $user.samaccountname + $suff
+        $allGroupNames[$gn] = $null
     }
 }
-# Fetch unique group objects for _RW and _RO in bulk
-foreach ($grpName in $allRWROGroups.Keys) {
-    $grp = Get-ADGroup -Identity $grpName -Properties managedBy -ErrorAction SilentlyContinue
-    $allRWROGroups[$grpName] = $grp
-    if ($grp) {
-        $allRWROGroupMgrs[$grpName] = $grp.managedBy
-        $allRWROGroupMembers[$grpName] = @{}
-        foreach ($member in Get-ADGroupMember -Identity $grp -Recursive -ErrorAction SilentlyContinue) {
-            $allRWROGroupMembers[$grpName][$member.DistinguishedName] = $true
+$allGroupObjects = @{}
+$allGroupManagers = @{}
+$allGroupMembers = @{}
+foreach ($groupname in $allGroupNames.Keys) {
+    Write-Log "Looking up group $groupname"
+    $gobj = Get-ADGroup -Identity $groupname -Properties managedBy -ErrorAction SilentlyContinue
+    $allGroupObjects[$groupname] = $gobj
+    if ($gobj) {
+        $allGroupManagers[$groupname] = $gobj.managedBy
+        $members = @{}
+        try {
+            $memobjs = Get-ADGroupMember -Identity $gobj -Recursive -ErrorAction SilentlyContinue
+            foreach ($mem in $memobjs) { $members[$mem.DistinguishedName] = $true }
+            Write-Log "Loaded $($memobjs.Count) members for $groupname"
+        } catch {
+            Write-Log "Error loading members for group $groupname: $_" "WARN"
         }
+        $allGroupMembers[$groupname] = $members
+    } else {
+        Write-Log "Group $groupname not found." "WARN"
     }
 }
 
-# ==== Prepare manager lookup cache ====
+# 4. Manager cache
 $managerCache = @{}
 
-# ==== Prepare output list using strongly-typed .NET List ====
+# 5. Process users
 $outputList = New-Object 'System.Collections.Generic.List[Object]'
+$userIndex = 0
+ForEach ($user in $users) {
+    $userIndex++
+    $userSam = $user.samaccountname
+    Write-Log "Processing user $userSam ($userIndex/$($users.Count))"
 
-foreach ($user in $users) {
-    # Resolve manager from cache or AD
+    # Manager (cache)
     $managerDN = $user.manager
     if ($managerDN) {
         if (-not $managerCache.ContainsKey($managerDN)) {
-            $managerObj = Get-ADUser -Identity $managerDN -Properties samaccountname -ErrorAction SilentlyContinue
-            $managerCache[$managerDN] = $managerObj.samaccountname
+            $mgrObj = Get-ADUser -Identity $managerDN -Properties samaccountname -ErrorAction SilentlyContinue
+            $managerCache[$managerDN] = if ($mgrObj) { $mgrObj.samaccountname } else { "" }
+            if ($mgrObj) { Write-Log " - Cached manager $($mgrObj.samaccountname) for $userSam" }
+            else { Write-Log " - Manager for $userSam not found" "WARN" }
         }
         $managerName = $managerCache[$managerDN]
-    } else {
-        $managerName = ""
-    }
+    } else { $managerName = "" }
 
-    # Password reset and creation dates
     $lastPwdReset = if ($user.pwdlastset) { [datetime]::FromFileTime($user.pwdlastset) } else { "" }
 
-    # Membership in "phase1", "phase2", "inscope"
+    # Membership in phase1, phase2, inscope
     $userGroups = @()
     foreach ($k in $groupInfo.Keys) {
         if ($user.memberOf -contains $groupInfo[$k]) { $userGroups += $k }
     }
 
-    # For each _RW and _RO group, check existence, manager, and membership
-    foreach ($suffix in @("_RW", "_RO")) {
-        $grpName = $user.samaccountname + $suffix
-        $grpObj = $allRWROGroups[$grpName]
-        $grpExists = if ($grpObj) { "Yes" } else { "No" }
-        $grpMgrDN = $allRWROGroupMgrs[$grpName]
-        $grpMgrName = ""
-        $grpMgrIsMember = ""
+    $rwName = $userSam + "_RW"
+    $roName = $userSam + "_RO"
 
-        if ($grpMgrDN) {
-            # Cache manager names, check membership via hash table
-            if (-not $managerCache.ContainsKey($grpMgrDN)) {
-                $mgrObj = Get-ADUser -Identity $grpMgrDN -Properties samaccountname, distinguishedName -ErrorAction SilentlyContinue
-                $managerCache[$grpMgrDN] = $mgrObj.samaccountname
-            }
-            $grpMgrName = $managerCache[$grpMgrDN]
-            $grpMgrIsMember = if ($allRWROGroupMembers[$grpName].ContainsKey($grpMgrDN)) { "Yes" } else { "No" }
+    # RW group
+    $rwObj = $allGroupObjects[$rwName]
+    $rwExists = if ($rwObj) { "Yes" } else { "No" }
+    $rwMgrDN = $allGroupManagers[$rwName]
+    $rwMgrName = ""
+    $rwMgrIsMember = ""
+    if ($rwMgrDN) {
+        if (-not $managerCache.ContainsKey($rwMgrDN)) {
+            $rwMgrObj = Get-ADUser -Identity $rwMgrDN -Properties samaccountname,distinguishedName -ErrorAction SilentlyContinue
+            $managerCache[$rwMgrDN] = if ($rwMgrObj) { $rwMgrObj.samaccountname } else { "" }
         }
-        # ... collect all other output fields
+        $rwMgrName = $managerCache[$rwMgrDN]
+        $rwMgrIsMember = if ($rwObj -and $allGroupMembers[$rwName].ContainsKey($rwMgrDN)) { "Yes" } elseif ($rwObj) { "No" } else { "" }
+        Write-Log " - RW group: Exists=$rwExists; Manager=$rwMgrName; IsMember=$rwMgrIsMember"
     }
-    # Compose result object for current user and add to outputList
-    $outputObj = [PSCustomObject]@{
-        samaccountname = $user.samaccountname
+
+    # RO group
+    $roObj = $allGroupObjects[$roName]
+    $roExists = if ($roObj) { "Yes" } else { "No" }
+    $roMgrDN = $allGroupManagers[$roName]
+    $roMgrName = ""
+    $roMgrIsMember = ""
+    if ($roMgrDN) {
+        if (-not $managerCache.ContainsKey($roMgrDN)) {
+            $roMgrObj = Get-ADUser -Identity $roMgrDN -Properties samaccountname,distinguishedName -ErrorAction SilentlyContinue
+            $managerCache[$roMgrDN] = if ($roMgrObj) { $roMgrObj.samaccountname } else { "" }
+        }
+        $roMgrName = $managerCache[$roMgrDN]
+        $roMgrIsMember = if ($roObj -and $allGroupMembers[$roName].ContainsKey($roMgrDN)) { "Yes" } elseif ($roObj) { "No" } else { "" }
+        Write-Log " - RO group: Exists=$roExists; Manager=$roMgrName; IsMember=$roMgrIsMember"
+    }
+
+    # Output object
+    $outputList.Add([PSCustomObject]@{
+        samaccountname = $userSam
         manager = $managerName
         whencreated = $user.whencreated
         lastpwdreset = $lastPwdReset
         groups = $userGroups -join ","
-        # ... plus RW/RO columns for existence, manager, manager-is-member
-    }
-    $outputList.Add($outputObj)
+        RW_Group_Exists = $rwExists
+        RW_Group_Manager = $rwMgrName
+        RW_Manager_MemberOf_RW_Group = $rwMgrIsMember
+        RO_Group_Exists = $roExists
+        RO_Group_Manager = $roMgrName
+        RO_Manager_MemberOf_RO_Group = $roMgrIsMember
+    })
 }
 
+Write-Log "Writing CSV file ($outputPath)..."
 $outputList | Export-Csv -Path $outputPath -NoTypeInformation -Encoding UTF8
-
-# ... Logging as before, but only log on major failures
+Write-Log "Exported $($outputList.Count) users to CSV."
+Write-Log "SCRIPT COMPLETED"
+Write-Host "DONE. See log file ($logPath) for verbose actions."
