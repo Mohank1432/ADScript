@@ -1,0 +1,106 @@
+Import-Module ActiveDirectory
+
+# ==== Variables to Adjust Easily ====
+$outputPath = "C:\Temp\AD_Users_Output.csv"
+$logPath = "C:\Temp\AD_Users_Script.log"
+$groupsToCheck = @("phase1", "phase2", "inscope")
+$ldapFilter = "(&(objectCategory=person)(objectClass=user))"
+
+# ==== Cache lookups ====
+$groupInfo = @{}
+foreach ($g in $groupsToCheck) {
+    $group = Get-ADGroup -Identity $g -ErrorAction SilentlyContinue
+    if ($group) { $groupInfo[$g] = $group.DistinguishedName }
+}
+
+# Bulk get all users
+$users = Get-ADUser -LDAPFilter $ldapFilter -Properties samaccountname, manager, whencreated, pwdlastset, memberOf
+
+# ==== Cache all _RW and _RO groups and their members ====
+$allRWROGroups = @{}
+$allRWROGroupMgrs = @{}
+$allRWROGroupMembers = @{}
+
+# Precompute RW and RO group names for all users
+foreach ($user in $users) {
+    foreach ($suffix in @("_RW", "_RO")) {
+        $grpName = $user.samaccountname + $suffix
+        $allRWROGroups[$grpName] = $null
+    }
+}
+# Fetch unique group objects for _RW and _RO in bulk
+foreach ($grpName in $allRWROGroups.Keys) {
+    $grp = Get-ADGroup -Identity $grpName -Properties managedBy -ErrorAction SilentlyContinue
+    $allRWROGroups[$grpName] = $grp
+    if ($grp) {
+        $allRWROGroupMgrs[$grpName] = $grp.managedBy
+        $allRWROGroupMembers[$grpName] = @{}
+        foreach ($member in Get-ADGroupMember -Identity $grp -Recursive -ErrorAction SilentlyContinue) {
+            $allRWROGroupMembers[$grpName][$member.DistinguishedName] = $true
+        }
+    }
+}
+
+# ==== Prepare manager lookup cache ====
+$managerCache = @{}
+
+# ==== Prepare output list using strongly-typed .NET List ====
+$outputList = New-Object 'System.Collections.Generic.List[Object]'
+
+foreach ($user in $users) {
+    # Resolve manager from cache or AD
+    $managerDN = $user.manager
+    if ($managerDN) {
+        if (-not $managerCache.ContainsKey($managerDN)) {
+            $managerObj = Get-ADUser -Identity $managerDN -Properties samaccountname -ErrorAction SilentlyContinue
+            $managerCache[$managerDN] = $managerObj.samaccountname
+        }
+        $managerName = $managerCache[$managerDN]
+    } else {
+        $managerName = ""
+    }
+
+    # Password reset and creation dates
+    $lastPwdReset = if ($user.pwdlastset) { [datetime]::FromFileTime($user.pwdlastset) } else { "" }
+
+    # Membership in "phase1", "phase2", "inscope"
+    $userGroups = @()
+    foreach ($k in $groupInfo.Keys) {
+        if ($user.memberOf -contains $groupInfo[$k]) { $userGroups += $k }
+    }
+
+    # For each _RW and _RO group, check existence, manager, and membership
+    foreach ($suffix in @("_RW", "_RO")) {
+        $grpName = $user.samaccountname + $suffix
+        $grpObj = $allRWROGroups[$grpName]
+        $grpExists = if ($grpObj) { "Yes" } else { "No" }
+        $grpMgrDN = $allRWROGroupMgrs[$grpName]
+        $grpMgrName = ""
+        $grpMgrIsMember = ""
+
+        if ($grpMgrDN) {
+            # Cache manager names, check membership via hash table
+            if (-not $managerCache.ContainsKey($grpMgrDN)) {
+                $mgrObj = Get-ADUser -Identity $grpMgrDN -Properties samaccountname, distinguishedName -ErrorAction SilentlyContinue
+                $managerCache[$grpMgrDN] = $mgrObj.samaccountname
+            }
+            $grpMgrName = $managerCache[$grpMgrDN]
+            $grpMgrIsMember = if ($allRWROGroupMembers[$grpName].ContainsKey($grpMgrDN)) { "Yes" } else { "No" }
+        }
+        # ... collect all other output fields
+    }
+    # Compose result object for current user and add to outputList
+    $outputObj = [PSCustomObject]@{
+        samaccountname = $user.samaccountname
+        manager = $managerName
+        whencreated = $user.whencreated
+        lastpwdreset = $lastPwdReset
+        groups = $userGroups -join ","
+        # ... plus RW/RO columns for existence, manager, manager-is-member
+    }
+    $outputList.Add($outputObj)
+}
+
+$outputList | Export-Csv -Path $outputPath -NoTypeInformation -Encoding UTF8
+
+# ... Logging as before, but only log on major failures
