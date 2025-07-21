@@ -7,11 +7,10 @@
     It checks for membership in a defined list of "in-scope" groups.
     It also verifies the existence of corresponding '[sAMAccountName]_RW' and '[sAMAccountName]_RO' groups,
     and reports on the manager of those groups if they exist.
+    Finally, it compares the user's manager to the group managers.
 
-    The script is optimized for performance in large environments by pre-caching group data
-    and employs robust error handling to ensure completion even with inconsistent AD data.
 .NOTES
-    Version: 1.4 (Corrected)
+    Version: 1.5 (Updated)
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Execution Policy: The script must be run under an execution policy that allows script execution (e.g., RemoteSigned).
@@ -140,17 +139,27 @@ Try {
         $processedCount++
         Write-Progress -Activity "Processing Users" -Status "Processing $($user.sAMAccountName) ($processedCount of $totalUsers)" -PercentComplete (($processedCount / $totalUsers) * 100)
 
+        # ✨ NEW: Format the pwdLastSet attribute into a readable DateTime object.
+        $passwordLastSetDate = if ($user.pwdLastSet -gt 0) {
+            [datetime]::FromFileTime($user.pwdLastSet)
+        } else {
+            'Never' # Display 'Never' if the value is 0 or less.
+        }
+
         # Create the custom object for the report row.
+        # ✨ NEW: Added RW_ManagerMatch and RO_ManagerMatch columns.
         $reportObject = [PSCustomObject]@{
             sAMAccountName     = $user.sAMAccountName
             ManagerSAM         = ''
             WhenCreated        = $user.whenCreated
-            PasswordLastSet    = $user.pwdLastSet
+            PasswordLastSet    = $passwordLastSetDate # Use the formatted date
             InScopeGroups      = ''
             RW_GroupExists     = 'No'
             RO_GroupExists     = 'No'
             RW_GroupManagerSAM = ''
             RO_GroupManagerSAM = ''
+            RW_ManagerMatch    = 'No' # Default to No
+            RO_ManagerMatch    = 'No' # Default to No
         }
 
         # Resolve User's Manager DN to sAMAccountName
@@ -205,6 +214,16 @@ Try {
             }
         }
 
+        # ✨ NEW: Perform manager comparison logic.
+        # This check ensures that the match is only 'Yes' if both fields have a value and are identical.
+        if (($reportObject.ManagerSAM -ne '') -and ($reportObject.RW_GroupManagerSAM -ne '') -and ($reportObject.ManagerSAM -eq $reportObject.RW_GroupManagerSAM)) {
+            $reportObject.RW_ManagerMatch = 'Yes'
+        }
+
+        if (($reportObject.ManagerSAM -ne '') -and ($reportObject.RO_GroupManagerSAM -ne '') -and ($reportObject.ManagerSAM -eq $reportObject.RO_GroupManagerSAM)) {
+            $reportObject.RO_ManagerMatch = 'Yes'
+        }
+
         # Add the completed object to the results list.
         [void]$resultsList.Add($reportObject)
     }
@@ -225,10 +244,6 @@ catch {
     # This is the global catch block for catastrophic errors.
     $errorMessage = "A fatal error occurred: $($_.Exception.Message)"
     Write-Error $errorMessage
-    # The 'throw' statement below is commented out as it can prevent the 'finally' block from
-    # running in some PowerShell environments/hosts when run from the console. 
-    # Stop-Transcript in the 'finally' block is more critical.
-    # throw $errorMessage 
 }
 finally {
     # This block always runs, ensuring the transcript is stopped.
