@@ -11,7 +11,7 @@
     The script is optimized for performance in large environments by pre-caching group data
     and employs robust error handling to ensure completion even with inconsistent AD data.
 .NOTES
-    Version: 1.1
+    Version: 1.2
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Execution Policy: The script must be run under an execution policy that allows script execution (e.g., RemoteSigned).
@@ -159,7 +159,7 @@ Try {
                 $reportObject.ManagerSAM = $managerUser.sAMAccountName
             }
             catch {
-                Write-Warning "Manager with DN '$($user.manager)' for user '$($user.sAMAccountName)' not found."
+                Write-Warning "Manager with DN '$($user.manager)' for user '$($user.sAMAccountName)' not found. The account may have been deleted."
             }
             catch {
                 Write-Warning "An error occurred resolving manager for user '$($user.sAMAccountName)': $($_.Exception.Message)"
@@ -186,7 +186,7 @@ Try {
                     $reportObject.RW_GroupManagerSAM = $rwManagerUser.sAMAccountName
                 }
                 catch {
-                    Write-Warning "Manager with DN '$($rwGroup.managedBy)' for group '$($rwGroup.sAMAccountName)' not found."
+                    Write-Warning "Manager with DN '$($rwGroup.managedBy)' for group '$($rwGroup.sAMAccountName)' not found. The account may have been deleted."
                 }
                 catch {
                     Write-Warning "An error occurred resolving manager for group '$($rwGroup.sAMAccountName)': $($_.Exception.Message)"
@@ -205,7 +205,7 @@ Try {
                     $reportObject.RO_GroupManagerSAM = $roManagerUser.sAMAccountName
                 }
                 catch {
-                    Write-Warning "Manager with DN '$($roGroup.managedBy)' for group '$($roGroup.sAMAccountName)' not found."
+                    Write-Warning "Manager with DN '$($roGroup.managedBy)' for group '$($roGroup.sAMAccountName)' not found. The account may have been deleted."
                 }
                 catch {
                     Write-Warning "An error occurred resolving manager for group '$($roGroup.sAMAccountName)': $($_.Exception.Message)"
