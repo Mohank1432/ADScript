@@ -11,7 +11,7 @@
     The script is optimized for performance in large environments by pre-caching group data
     and employs robust error handling to ensure completion even with inconsistent AD data.
 .NOTES
-    Version: 1.0
+    Version: 1.1
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Execution Policy: The script must be run under an execution policy that allows script execution (e.g., RemoteSigned).
@@ -36,8 +36,8 @@ Try {
     $LogPath = "C:\Temp\Logs"
 
     # LDAP filter to define the target user population.
-    # Example: Find all users that are enabled.
-    $LDAPFilter = "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
+    # Finds all enabled users where Company is like "Resource" or "Resource-Service", but not "Resource-Admin".
+    $LDAPFilter = "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(|(company=*Resource*)(company=Resource-Service))(!(company=Resource-Admin)))"
     # Example: Find all users in a specific OU.
     # $LDAPFilter = "(&(objectCategory=person)(objectClass=user))"
     # Note: If using the OU filter, also specify the -SearchBase parameter in the Get-ADUser command below.
@@ -73,7 +73,7 @@ Try {
 
     # 1.1: Get the primary list of users with all necessary properties.
     Write-Verbose "Retrieving target users with LDAP filter: $LDAPFilter"
-    $adUsers = Get-ADUser -LDAPFilter $LDAPFilter -Properties manager, whenCreated, pwdLastSet, memberOf -ErrorAction Stop
+    $adUsers = Get-ADUser -LDAPFilter $LDAPFilter -Properties manager, whenCreated, pwdLastSet, memberOf, company -ErrorAction Stop
     # To search a specific OU, add: -SearchBase "OU=YourOU,DC=domain,DC=com"
     
     if ($null -eq $adUsers) {
