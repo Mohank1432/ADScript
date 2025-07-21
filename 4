@@ -1,46 +1,243 @@
-# ====== Configuration ======
-$outputPath = "C:\Temp\AD_Users_Output.csv"
-$logPath    = "C:\Temp\AD_Users_Script.log"
-$groupsToCheck = @("phase1", "phase2", "inscope")
-# Service account filter
-$adServer = "corp.google.com"
-$userFilter = {
-    Enabled -eq $true -and (
-        (Company -like "Resource*") -or
-        (Company -eq "Resource-Service") -or
-        (Company -eq "Resource-Admin")
-    )
-}
-# ===========================
+<#
+.SYNOPSIS
+    Generates a comprehensive report on specified Active Directory users.
+.DESCRIPTION
+    This script retrieves a list of Active Directory users based on a configurable LDAP filter.
+    For each user, it reports on their sAMAccountName, manager, creation date, and password last set date.
+    It checks for membership in a defined list of "in-scope" groups.
+    It also verifies the existence of corresponding '[sAMAccountName]_RW' and '[sAMAccountName]_RO' groups,
+    and reports on the manager of those groups if they exist.
 
-function Write-Log {
-    param($msg, $level="INFO")
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $line = "[$timestamp][$level] $msg"
-    Add-Content -Path $logPath -Value $line
-    Write-Host $line
-}
+    The script is optimized for performance in large environments by pre-caching group data
+    and employs robust error handling to ensure completion even with inconsistent AD data.
+.NOTES
+    Version: 1.0
+    Author: Senior PowerShell and Active Directory Automation Specialist
+    Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
+    Execution Policy: The script must be run under an execution policy that allows script execution (e.g., RemoteSigned).
+    Permissions: The executing account needs read permissions for user and group objects in Active Directory.
+#>
 
-# ====== Script Start ======
-Remove-Item $logPath -ErrorAction SilentlyContinue
-Write-Log "SCRIPT STARTED"
+#================================================================================
+# SCRIPT EXECUTION WRAPPER WITH LOGGING AND ERROR HANDLING
+#================================================================================
 
-# 1. Reference groups
-$groupInfo = @{}
-foreach ($group in $groupsToCheck) {
-    Write-Log "Looking for group '$group'..."
-    $groupObj = Get-ADGroup -Server $adServer -Identity $group -ErrorAction SilentlyContinue
-    if ($groupObj) {
-        $groupInfo[$group] = $groupObj.DistinguishedName
-        Write-Log "Found group: $group"
-    } else {
-        Write-Log "Group '$group' not found!" "WARN"
+# Wrap the entire script in a Try/Finally block to ensure Stop-Transcript is always called.
+Try {
+    #----------------------------------------------------------------------------
+    # CONFIGURATION
+    #----------------------------------------------------------------------------
+    # Modify the variables in this section to suit your environment and needs.
+
+    # Path for the final CSV report.
+    $OutputPath = "C:\Temp\AD_User_Group_Report.csv"
+
+    # Directory for the transcript log file.
+    $LogPath = "C:\Temp\Logs"
+
+    # LDAP filter to define the target user population.
+    # Example: Find all users that are enabled.
+    $LDAPFilter = "(!(userAccountControl:1.2.840.113556.1.4.803:=2))"
+    # Example: Find all users in a specific OU.
+    # $LDAPFilter = "(&(objectCategory=person)(objectClass=user))"
+    # Note: If using the OU filter, also specify the -SearchBase parameter in the Get-ADUser command below.
+
+    # Array of group names to check for user membership.
+    $InScopeGroupNames = @("phase1", "phase2", "inscope")
+
+    #----------------------------------------------------------------------------
+    # INITIALIZATION
+    #----------------------------------------------------------------------------
+
+    # Create the log directory if it doesn't exist.
+    if (-not (Test-Path -Path $LogPath -PathType Container)) {
+        Write-Verbose "Log directory not found. Creating it at: $LogPath"
+        New-Item -Path $LogPath -ItemType Directory -Force | Out-Null
     }
+
+    # Set up transcript logging with a unique filename.
+    $Timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $TranscriptPath = Join-Path -Path $LogPath -ChildPath "AD_User_Report_$Timestamp.log"
+    Start-Transcript -Path $TranscriptPath
+    Write-Host "Script execution started. Logging to: $TranscriptPath"
+
+    # Check for Active Directory Module
+    if (-not (Get-Module -Name ActiveDirectory -ListAvailable)) {
+        throw "The Active Directory module for Windows PowerShell is not installed. Please install RSAT-AD-PowerShell."
+    }
+
+    #============================================================================
+    # PHASE 1: BULK DATA ACQUISITION AND CACHING
+    #============================================================================
+    Write-Host "Phase 1: Starting bulk data acquisition from Active Directory..."
+
+    # 1.1: Get the primary list of users with all necessary properties.
+    Write-Verbose "Retrieving target users with LDAP filter: $LDAPFilter"
+    $adUsers = Get-ADUser -LDAPFilter $LDAPFilter -Properties manager, whenCreated, pwdLastSet, memberOf -ErrorAction Stop
+    # To search a specific OU, add: -SearchBase "OU=YourOU,DC=domain,DC=com"
+    
+    if ($null -eq $adUsers) {
+        throw "No users found matching the specified LDAP filter. Halting execution."
+    }
+    Write-Host "$($adUsers.Count) users retrieved for processing."
+
+    # 1.2: Pre-cache the Distinguished Names of the "in-scope" groups.
+    Write-Verbose "Caching 'in-scope' group information..."
+    $inScopeGroupDNs = @{}
+    if ($InScopeGroupNames.Count -gt 0) {
+        $groupFilter = '(|' + ($InScopeGroupNames | ForEach-Object { "(sAMAccountName=$_)" }) + ')'
+        Get-ADGroup -LDAPFilter $groupFilter | ForEach-Object {
+            $inScopeGroupDNs = $_.sAMAccountName
+        }
+    }
+    Write-Host "$($inScopeGroupDNs.Count) 'in-scope' groups cached."
+
+    # 1.3: Pre-cache all potential _RW and _RO groups and their managers.
+    # PERFORMANCE: This is the core optimization. It avoids thousands of Get-ADGroup calls inside the loop.
+    Write-Verbose "Generating list of all potential _RW and _RO groups..."
+    $potentialGroupNames =]::new()
+    foreach ($user in $adUsers) {
+        $potentialGroupNames.Add("$($user.sAMAccountName)_RW")
+        $potentialGroupNames.Add("$($user.sAMAccountName)_RO")
+    }
+
+    Write-Verbose "Querying Active Directory for all existing _RW and _RO groups in a single bulk operation..."
+    $rwGroupCache = @{}
+    $roGroupCache = @{}
+    
+    # Process potential groups in batches to avoid overly large LDAP filters if necessary.
+    $batchSize = 400
+    $groupCount = $potentialGroupNames.Count
+    for ($i = 0; $i -lt $groupCount; $i += $batchSize) {
+        $batch = $potentialGroupNames.GetRange($i,::Min($batchSize, $groupCount - $i))
+        $groupLDAPFilter = "(|" + ($batch | ForEach-Object { "(sAMAccountName=$_)" }) + ")"
+        
+        $foundGroups = Get-ADGroup -LDAPFilter $groupLDAPFilter -Properties managedBy -ErrorAction SilentlyContinue
+        
+        foreach ($group in $foundGroups) {
+            if ($group.sAMAccountName.EndsWith("_RW")) {
+                $rwGroupCache[$group.sAMAccountName] = $group
+            }
+            elseif ($group.sAMAccountName.EndsWith("_RO")) {
+                $roGroupCache[$group.sAMAccountName] = $group
+            }
+        }
+    }
+    Write-Host "$($rwGroupCache.Count) _RW groups and $($roGroupCache.Count) _RO groups cached."
+
+    #============================================================================
+    # PHASE 2: PER-USER PROCESSING AND DATA ENRICHMENT
+    #============================================================================
+    Write-Host "Phase 2: Starting per-user processing and data enrichment..."
+
+    # Use a more efficient ArrayList for collecting results.
+    $resultsList =::new()
+    $totalUsers = $adUsers.Count
+    $processedCount = 0
+
+    foreach ($user in $adUsers) {
+        $processedCount++
+        Write-Progress -Activity "Processing Users" -Status "Processing $($user.sAMAccountName) ($processedCount of $totalUsers)" -PercentComplete (($processedCount / $totalUsers) * 100)
+
+        # Create the custom object for the report row.
+        $reportObject =@{
+            sAMAccountName     = $user.sAMAccountName
+            ManagerSAM         = ''
+            WhenCreated        = $user.whenCreated
+            PasswordLastSet    = $user.pwdLastSet
+            InScopeGroups      = ''
+            RW_GroupExists     = 'No'
+            RO_GroupExists     = 'No'
+            RW_GroupManagerSAM = ''
+            RO_GroupManagerSAM = ''
+        }
+
+        # Resolve User's Manager DN to sAMAccountName
+        if (-not [string]::IsNullOrEmpty($user.manager)) {
+            try {
+                $managerUser = Get-ADUser -Identity $user.manager -ErrorAction Stop
+                $reportObject.ManagerSAM = $managerUser.sAMAccountName
+            }
+            catch {
+                Write-Warning "Manager with DN '$($user.manager)' for user '$($user.sAMAccountName)' not found."
+            }
+            catch {
+                Write-Warning "An error occurred resolving manager for user '$($user.sAMAccountName)': $($_.Exception.Message)"
+            }
+        }
+
+        # Check for membership in "in-scope" groups
+        $userInScopeGroups = @()
+        foreach ($groupDN in $user.memberOf) {
+            if ($inScopeGroupDNs.ContainsKey($groupDN)) {
+                $userInScopeGroups += $inScopeGroupDNs
+            }
+        }
+        $reportObject.InScopeGroups = $userInScopeGroups -join ", "
+
+        # Check for _RW group existence and manager from cache
+        $rwGroupName = "$($user.sAMAccountName)_RW"
+        if ($rwGroupCache.ContainsKey($rwGroupName)) {
+            $reportObject.RW_GroupExists = 'Yes'
+            $rwGroup = $rwGroupCache[$rwGroupName]
+            if (-not [string]::IsNullOrEmpty($rwGroup.managedBy)) {
+                try {
+                    $rwManagerUser = Get-ADUser -Identity $rwGroup.managedBy -ErrorAction Stop
+                    $reportObject.RW_GroupManagerSAM = $rwManagerUser.sAMAccountName
+                }
+                catch {
+                    Write-Warning "Manager with DN '$($rwGroup.managedBy)' for group '$($rwGroup.sAMAccountName)' not found."
+                }
+                catch {
+                    Write-Warning "An error occurred resolving manager for group '$($rwGroup.sAMAccountName)': $($_.Exception.Message)"
+                }
+            }
+        }
+
+        # Check for _RO group existence and manager from cache
+        $roGroupName = "$($user.sAMAccountName)_RO"
+        if ($roGroupCache.ContainsKey($roGroupName)) {
+            $reportObject.RO_GroupExists = 'Yes'
+            $roGroup = $roGroupCache[$roGroupName]
+            if (-not [string]::IsNullOrEmpty($roGroup.managedBy)) {
+                try {
+                    $roManagerUser = Get-ADUser -Identity $roGroup.managedBy -ErrorAction Stop
+                    $reportObject.RO_GroupManagerSAM = $roManagerUser.sAMAccountName
+                }
+                catch {
+                    Write-Warning "Manager with DN '$($roGroup.managedBy)' for group '$($roGroup.sAMAccountName)' not found."
+                }
+                catch {
+                    Write-Warning "An error occurred resolving manager for group '$($roGroup.sAMAccountName)': $($_.Exception.Message)"
+                }
+            }
+        }
+
+        # Add the completed object to the results list.
+        [void]$resultsList.Add($reportObject)
+    }
+
+    #============================================================================
+    # EXPORT RESULTS
+    #============================================================================
+    Write-Host "Processing complete. Exporting $($resultsList.Count) records to CSV..."
+    if ($resultsList.Count -gt 0) {
+        $resultsList | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+        Write-Host "Successfully exported report to: $OutputPath"
+    }
+    else {
+        Write-Warning "No data was generated to export."
+    }
+
 }
-
-# 2. Service account user query with specified filter
-Write-Log "Querying service accounts with company filter..."
-$users = Get-ADUser -Server $adServer -Filter $userFilter -Properties samaccountname,manager,whenCreated,pwdlastset,memberOf
-Write-Log ("Found {0} users matching service account filter." -f $users.Count)
-
-# --- Rest of your script logic for group checks, member lookups, output, etc. ---
+catch {
+    # This is the global catch block for catastrophic errors.
+    $errorMessage = "A fatal error occurred: $($_.Exception.Message)"
+    Write-Error $errorMessage
+    throw $errorMessage # Re-throw to ensure script exit code reflects failure.
+}
+finally {
+    # This block always runs, ensuring the transcript is stopped.
+    Write-Host "Script execution finished. Stopping transcript."
+    Stop-Transcript
+}
