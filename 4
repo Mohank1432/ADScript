@@ -11,7 +11,7 @@
     The script is optimized for performance in large environments by pre-caching group data
     and employs robust error handling to ensure completion even with inconsistent AD data.
 .NOTES
-    Version: 1.2
+    Version: 1.3
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Execution Policy: The script must be run under an execution policy that allows script execution (e.g., RemoteSigned).
@@ -162,7 +162,7 @@ Try {
                 Write-Warning "Manager with DN '$($user.manager)' for user '$($user.sAMAccountName)' not found. The account may have been deleted."
             }
             catch {
-                Write-Warning "An error occurred resolving manager for user '$($user.sAMAccountName)': $($_.Exception.Message)"
+                Write-Warning "A general error occurred resolving manager for user '$($user.sAMAccountName)': $($_.Exception.Message)"
             }
         }
 
@@ -189,7 +189,7 @@ Try {
                     Write-Warning "Manager with DN '$($rwGroup.managedBy)' for group '$($rwGroup.sAMAccountName)' not found. The account may have been deleted."
                 }
                 catch {
-                    Write-Warning "An error occurred resolving manager for group '$($rwGroup.sAMAccountName)': $($_.Exception.Message)"
+                    Write-Warning "A general error occurred resolving manager for group '$($rwGroup.sAMAccountName)': $($_.Exception.Message)"
                 }
             }
         }
@@ -208,7 +208,7 @@ Try {
                     Write-Warning "Manager with DN '$($roGroup.managedBy)' for group '$($roGroup.sAMAccountName)' not found. The account may have been deleted."
                 }
                 catch {
-                    Write-Warning "An error occurred resolving manager for group '$($roGroup.sAMAccountName)': $($_.Exception.Message)"
+                    Write-Warning "A general error occurred resolving manager for group '$($roGroup.sAMAccountName)': $($_.Exception.Message)"
                 }
             }
         }
