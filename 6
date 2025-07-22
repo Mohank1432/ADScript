@@ -88,17 +88,15 @@ try {
         }
     }
 
-    # --- Perform Final Comparisons for Manager ---
-    if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RW_GroupManagerSAM)) { $report.RW_ManagerMatch = 'Yes' }
-    if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RO_ManagerMatch)) { $report.RO_ManagerMatch = 'Yes' }
+    # --- ✨ FIX: Trim whitespace from SAM account names before comparing for a reliable match ---
+    if (($report.ManagerSAM) -and ($report.RW_GroupManagerSAM) -and ($report.ManagerSAM.Trim() -eq $report.RW_GroupManagerSAM.Trim())) { $report.RW_ManagerMatch = 'Yes' }
+    if (($report.ManagerSAM) -and ($report.RO_GroupManagerSAM) -and ($report.ManagerSAM.Trim() -eq $report.RO_GroupManagerSAM.Trim())) { $report.RO_ManagerMatch = 'Yes' }
 
-    # --- ✨ FIX: Display the main report and additional checks separately ---
 
-    # Display the main report object first
+    # --- Display the main report and additional checks separately ---
     Write-Host "--- Primary Account Details: $($report.sAMAccountName) ---" -ForegroundColor Green
     [PSCustomObject]$report
 
-    # Now, process and display the additional user checks as a separate table
     if ($memberCheckUserSAMs.Count -gt 0) {
         Write-Host "`n--- Additional User Membership Check ---" -ForegroundColor Green
         $additionalChecks = foreach ($sam in $memberCheckUserSAMs) {
@@ -121,7 +119,6 @@ try {
             catch {}
             [PSCustomObject]$checkResult
         }
-        # Display the results which will format as a nice table
         $additionalChecks
     }
 
