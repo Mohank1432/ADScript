@@ -9,7 +9,7 @@
     until expiry. It also verifies the existence of corresponding _RW and _RO groups and their managers.
 
 .NOTES
-    Version: 2.0 (Feature Update)
+    Version: 2.1 (Fixes and Enhancements)
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Execution Policy: The script must be run under an execution policy that allows script execution (e.g., RemoteSigned).
@@ -28,10 +28,10 @@ Try {
     $LogPath = "C:\Temp\Logs"
     $LDAPFilter = "(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2))(|(company=*Resource*)(company=Resource-Service))(!(company=Resource-Admin)))"
     
-    # ✨ NEW: Define the password rotation policy groups.
-    $RotationGroupNames = @("norotation", "30dayrotation", "90dayrotation", "180dayrotation", "365dayrotation")
+    # ✨ FIX: Define all groups to be checked for the 'InScopeGroups' column.
+    $InScopeGroupNames = @("norotation", "30dayrotation", "90dayrotation", "180dayrotation", "365dayrotation", "phase1", "phase2")
 
-    # ✨ NEW: Map group names to the number of days in their policy. -1 signifies no rotation.
+    # ✨ This map is used specifically for password policy calculations.
     $RotationPolicyMap = @{
         'norotation'     = -1
         '30dayrotation'  = 30
@@ -68,14 +68,14 @@ Try {
     if ($null -eq $adUsers) { throw "No users found matching the specified LDAP filter. Halting execution." }
     Write-Host "$($adUsers.Count) users retrieved for processing."
 
-    # 1.2: Pre-cache password rotation policy groups
-    Write-Verbose "Caching password rotation policy group information..."
-    $rotationGroupLookup = @{}
-    if ($RotationGroupNames.Count -gt 0) {
-        $groupFilter = '(|' + ($RotationGroupNames | ForEach-Object { "(sAMAccountName=$_)" }) + ')'
-        Get-ADGroup -LDAPFilter $groupFilter | ForEach-Object { $rotationGroupLookup[$_.DistinguishedName] = $_.sAMAccountName }
+    # 1.2: Pre-cache all "in-scope" groups (both policy and phase groups)
+    Write-Verbose "Caching in-scope group information..."
+    $inScopeGroupLookup = @{}
+    if ($InScopeGroupNames.Count -gt 0) {
+        $groupFilter = '(|' + ($InScopeGroupNames | ForEach-Object { "(sAMAccountName=$_)" }) + ')'
+        Get-ADGroup -LDAPFilter $groupFilter | ForEach-Object { $inScopeGroupLookup[$_.DistinguishedName] = $_.sAMAccountName }
     }
-    Write-Host "$($rotationGroupLookup.Count) rotation policy groups cached."
+    Write-Host "$($inScopeGroupLookup.Count) in-scope groups cached."
     
     # 1.3: Pre-cache members of the non-interactive group
     Write-Verbose "Caching members of the '$NonInteractiveGroupName' group..."
@@ -117,7 +117,7 @@ Try {
     foreach ($user in $adUsers) {
         Write-Progress -Activity "Processing Users" -Status "Processing $($user.sAMAccountName)" -PercentComplete (($resultsList.Count / $adUsers.Count) * 100)
 
-        # ✨ NEW: Added password policy columns and removed InScopeGroups
+        # ✨ FIX: Re-added InScopeGroups column
         $reportObject = [PSCustomObject]@{
             sAMAccountName         = $user.sAMAccountName
             AccountType            = 'Interactive'
@@ -128,6 +128,7 @@ Try {
             WhenCreated            = $user.whenCreated
             PasswordLastSet        = 'Never'
             DaysSincePasswordReset = 'N/A'
+            InScopeGroups          = ''
             PasswordPolicyDays     = 'N/A'
             PasswordExpiryDate     = 'N/A'
             DaysUntilExpiry        = 'N/A'
@@ -159,25 +160,34 @@ Try {
             } catch { Write-Warning "Could not resolve manager with DN '$($user.manager)' for user '$($user.sAMAccountName)'. Error: $($_.Exception.Message)" }
         }
 
-        # ✨ NEW: Determine password policy and calculate expiry
+        # ✨ FIX: Logic to handle multiple group memberships and prioritize password policy.
+        $userInScopeGroups = @()
+        $policyApplied = $false
         foreach ($groupDN in $user.memberOf) {
-            if ($rotationGroupLookup.ContainsKey($groupDN)) {
-                $policyGroupName = $rotationGroupLookup[$groupDN]
-                $policyDays = $RotationPolicyMap[$policyGroupName]
-                
-                if ($policyDays -eq -1) {
-                    $reportObject.PasswordPolicyDays = "No Rotation"
-                } else {
-                    $reportObject.PasswordPolicyDays = $policyDays
-                    if ($passwordLastSetDate) {
-                        $expiryDate = $passwordLastSetDate.AddDays($policyDays)
-                        $reportObject.PasswordExpiryDate = $expiryDate
-                        $reportObject.DaysUntilExpiry = ($expiryDate.Date - $today).Days
+            if ($inScopeGroupLookup.ContainsKey($groupDN)) {
+                $groupName = $inScopeGroupLookup[$groupDN]
+                $userInScopeGroups += $groupName # Add all matching in-scope groups to the list
+
+                # Check for a password policy, but only apply the first one found
+                if (-not $policyApplied -and $RotationPolicyMap.ContainsKey($groupName)) {
+                    $policyDays = $RotationPolicyMap[$groupName]
+                    
+                    if ($policyDays -eq -1) {
+                        $reportObject.PasswordPolicyDays = "No Rotation"
+                    } else {
+                        $reportObject.PasswordPolicyDays = $policyDays
+                        if ($passwordLastSetDate) {
+                            $expiryDate = $passwordLastSetDate.AddDays($policyDays)
+                            $reportObject.PasswordExpiryDate = $expiryDate
+                            $reportObject.DaysUntilExpiry = ($expiryDate.Date - $today).Days
+                        }
                     }
+                    $policyApplied = $true # Mark that a policy has been found and applied
                 }
-                break # Assume user is in only one policy group and stop checking
             }
         }
+        $reportObject.InScopeGroups = $userInScopeGroups -join ", "
+
 
         $rwGroupName = "$($user.sAMAccountName)_RW"
         if ($rwGroupCache.ContainsKey($rwGroupName)) {
