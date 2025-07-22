@@ -1,15 +1,29 @@
-# 1. SET THE ACCOUNT NAME YOU WANT TO QUERY
-$accountName = 'testuser1'
+# 1. SET THE PRIMARY ACCOUNT TO INVESTIGATE
+$targetAccountName = 'testuser1'
 
-# 2. RUN THE QUERY BLOCK
+# 2. SET THE LIST OF ADDITIONAL USERS TO CHECK FOR MEMBERSHIP
+$memberCheckUserSAMs = @(
+    'anotheruser'
+    'adminuser1'
+    'testuser2'
+)
+
+# 3. RUN THE QUERY BLOCK
 try {
-    # Get the user and all base properties needed for the report
-    $user = Get-ADUser -Identity $accountName -Properties manager, whenCreated, pwdLastSet, memberOf, DistinguishedName -ErrorAction Stop
+    # Get the target user and all base properties
+    $user = Get-ADUser -Identity $targetAccountName -Properties manager, whenCreated, pwdLastSet, memberOf, DistinguishedName -ErrorAction Stop
 
-    # Define the properties for the final output object
+    # --- Pre-fetch Associated Groups (_RW and _RO) ---
+    # Fetching these early allows us to use their data for multiple checks
+    $rwGroup = $null
+    $roGroup = $null
+    try { $rwGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RW" -Properties managedBy, member -ErrorAction Stop } catch {}
+    try { $roGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RO" -Properties managedBy, member -ErrorAction Stop } catch {}
+
+    # --- Define the Report Structure ---
     $report = [ordered]@{
         sAMAccountName         = $user.sAMAccountName
-        AccountType            = 'Interactive' # Default value
+        AccountType            = 'Interactive'
         ManagerSAM             = ''
         ManagerName            = ''
         ManagerEmail           = ''
@@ -22,74 +36,93 @@ try {
         RO_GroupExists         = 'No'
         RW_GroupManagerSAM     = ''
         RO_GroupManagerSAM     = ''
+        ManagerInRW_Group      = 'N/A'
+        ManagerInRO_Group      = 'N/A'
         RW_ManagerMatch        = 'No'
         RO_ManagerMatch        = 'No'
+        AdditionalMemberChecks = @() # Placeholder for the new check
     }
 
-    # --- Process User Details ---
-
-    # Check for non-interactive group membership
-    if ($user.memberOf -like '*CN=deny_interactvie,*') {
-        $report.AccountType = 'Non-Interactive'
-    }
-
-    # Check for in-scope group membership
+    # --- Process User and Manager Details ---
+    if ($user.memberOf -like '*CN=deny_interactvie,*') { $report.AccountType = 'Non-Interactive' }
     $inScopeGroups = $user.memberOf | Where-Object { $_ -match 'CN=(phase1|phase2|inscope),' } | ForEach-Object { ($_ -split ',')[0].Replace('CN=', '') }
-    if ($inScopeGroups) {
-        $report.InScopeGroups = $inScopeGroups -join ", "
-    }
+    if ($inScopeGroups) { $report.InScopeGroups = $inScopeGroups -join ", " }
 
-    # Calculate password age
     if ($user.pwdLastSet -gt 0) {
         $pwdLastSetDate = [datetime]::FromFileTime($user.pwdLastSet)
         $report.PasswordLastSet = $pwdLastSetDate
         $report.DaysSincePasswordReset = ((Get-Date) - $pwdLastSetDate).Days
     }
 
-    # Get Manager details
+    $manager = $null
     if ($user.manager) {
         try {
-            $manager = Get-ADUser -Identity $user.manager -Properties sAMAccountName, Name, EmailAddress, Department -ErrorAction Stop
+            $manager = Get-ADUser -Identity $user.manager -Properties sAMAccountName, Name, EmailAddress, Department, DistinguishedName -ErrorAction Stop
             $report.ManagerSAM = $manager.sAMAccountName
             $report.ManagerName = $manager.Name
             $report.ManagerEmail = $manager.EmailAddress
             $report.ManagerDepartment = $manager.Department
-        }
-        catch { Write-Warning "Could not resolve manager: $($user.manager)" }
+        } catch { Write-Warning "Could not resolve manager: $($user.manager)" }
     }
 
-    # --- Process Associated Groups (_RW and _RO) ---
-
-    # Check for the _RW group and its manager
-    try {
-        $rwGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RW" -Properties managedBy -ErrorAction Stop
+    # --- Process Associated Group Details ---
+    if ($rwGroup) {
         $report.RW_GroupExists = 'Yes'
+        $report.ManagerInRW_Group = 'No' # Default to No if group exists
         if ($rwGroup.managedBy) {
             $rwManager = Get-ADUser -Identity $rwGroup.managedBy -Properties sAMAccountName -ErrorAction SilentlyContinue
             if ($rwManager) { $report.RW_GroupManagerSAM = $rwManager.sAMAccountName }
         }
+        if ($manager -and $rwGroup.member -contains $manager.DistinguishedName) {
+            $report.ManagerInRW_Group = 'Yes'
+        }
     }
-    catch {} # Suppress error if group doesn't exist
 
-    # Check for the _RO group and its manager
-    try {
-        $roGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RO" -Properties managedBy -ErrorAction Stop
+    if ($roGroup) {
         $report.RO_GroupExists = 'Yes'
+        $report.ManagerInRO_Group = 'No' # Default to No if group exists
         if ($roGroup.managedBy) {
             $roManager = Get-ADUser -Identity $roGroup.managedBy -Properties sAMAccountName -ErrorAction SilentlyContinue
             if ($roManager) { $report.RO_GroupManagerSAM = $roManager.sAMAccountName }
         }
+        if ($manager -and $roGroup.member -contains $manager.DistinguishedName) {
+            $report.ManagerInRO_Group = 'Yes'
+        }
     }
-    catch {} # Suppress error if group doesn't exist
 
-    # --- Final Comparisons ---
+    # --- Perform Final Comparisons for Manager ---
     if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RW_GroupManagerSAM)) { $report.RW_ManagerMatch = 'Yes' }
     if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RO_GroupManagerSAM)) { $report.RO_ManagerMatch = 'Yes' }
+
+    # --- ✨ NEW: Perform Additional User Membership Checks ---
+    $additionalChecks = foreach ($sam in $memberCheckUserSAMs) {
+        $checkResult = [ordered]@{
+            UserAccount = $sam
+            Status      = 'Not Found'
+            MemberOf_RW = 'No'
+            MemberOf_RO = 'No'
+        }
+        try {
+            $checkUser = Get-ADUser -Identity $sam -Properties DistinguishedName -ErrorAction Stop
+            $checkResult.Status = 'Found'
+            if ($rwGroup -and $rwGroup.member -contains $checkUser.DistinguishedName) {
+                $checkResult.MemberOf_RW = 'Yes'
+            }
+            if ($roGroup -and $roGroup.member -contains $checkUser.DistinguishedName) {
+                $checkResult.MemberOf_RO = 'Yes'
+            }
+        }
+        catch {} # Suppress error if user not found, Status will remain 'Not Found'
+        
+        # Output the result object for this user
+        [PSCustomObject]$checkResult
+    }
+    $report.AdditionalMemberChecks = $additionalChecks
 
     # --- Display the final, consolidated object ---
     [PSCustomObject]$report
 
 }
 catch {
-    Write-Error "Failed to find or process account '$accountName'. Error: $($_.Exception.Message)"
+    Write-Error "Failed to find or process account '$targetAccountName'. Error: $($_.Exception.Message)"
 }
