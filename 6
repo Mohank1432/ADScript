@@ -1,46 +1,95 @@
-No,Event Description,Event ID(s)
-1,Failed Login Attempts,4625
-2,Account Lockouts,4740
-3,Successful Login Outside Business Hours,4624
-4,New User Creation,4720
-5,Privileged Account Usage,4672
-6,User Account Changes,"4722, 4723, 4724, 4725, 4726"
-7,Logon from Unusual Locations,"4624 (with geolocation analysis)"
-8,Password Changes,"4723 (change attempt), 4724 (successful reset)"
-9,Group Membership Changes,"4727, 4731, 4735, 4737"
-10,Suspicious Logon Patterns,"4624 (anomalous logons)"
-11,Excessive Logon Failures,4625
-12,Disabled Account Activity,4725
-13,Dormant Account Usage,"4624 (rarely used accounts)"
-14,Service Account Activity,"4624, 4672"
-15,RDP Access Monitoring,"4624 (with RDP-specific filtering)"
-16,Lateral Movement Detection,"4648 (network logons)"
-17,File and Folder Access,4663
-18,Unauthorised File Sharing,"5140, 5145"
-19,Registry Changes,4657
-20,Application Installation and Removal,"11707, 1033"
-21,USB Device Usage,"20001, 20003 (Device Management logs)"
-22,Windows Firewall Changes,"4946, 4947, 4950, 4951"
-23,Scheduled Task Creation,4698
-24,Process Execution Monitoring,4688
-25,System Restart or Shutdown,"6005, 6006, 1074"
-26,Event Log Clearing,1102
-27,Malware Execution or Indicators,"4688, 1116 (from Windows Defender)"
-28,Active Directory Changes,"5136, 5141"
-29,Shadow Copy Deletion,"524 (with VSSAdmin logs)"
-30,Network Configuration Changes,"4254, 4255, 10400"
-31,Execution of Suspicious Scripts,"4688 (script interpreter)"
-32,Service Installation or Modification,4697
-33,Clearing of Audit Logs,1102
-34,Software Restriction Policy Violation,865
-35,Excessive Account Enumeration,"4625, 4776"
-36,Attempt to Access Sensitive Files,4663
-37,Unusual Process Injection,"4688 (with EDR or Sysmon data)"
-38,Driver Installation,"7045 (Service Control Manager)"
-39,Modification of Scheduled Tasks,4699
-40,Unauthorised GPO Changes,5136
-41,Suspicious PowerShell Activity,"4104 (from PowerShell logs)"
-42,Unusual Network Connections,"5156 (network filtering platform)"
-43,Unauthorised Access to Shared Files,5145
-44,DNS Query for Malicious Domains,"5158 (DNS logs required)"
-45,LDAP Search Abuse,4662
+# 1. SET THE ACCOUNT NAME YOU WANT TO QUERY
+$accountName = 'testuser1'
+
+# 2. RUN THE QUERY BLOCK
+try {
+    # Get the user and all base properties needed for the report
+    $user = Get-ADUser -Identity $accountName -Properties manager, whenCreated, pwdLastSet, memberOf, DistinguishedName -ErrorAction Stop
+
+    # Define the properties for the final output object
+    $report = [ordered]@{
+        sAMAccountName         = $user.sAMAccountName
+        AccountType            = 'Interactive' # Default value
+        ManagerSAM             = ''
+        ManagerName            = ''
+        ManagerEmail           = ''
+        ManagerDepartment      = ''
+        WhenCreated            = $user.whenCreated
+        PasswordLastSet        = 'Never'
+        DaysSincePasswordReset = 'N/A'
+        InScopeGroups          = ''
+        RW_GroupExists         = 'No'
+        RO_GroupExists         = 'No'
+        RW_GroupManagerSAM     = ''
+        RO_GroupManagerSAM     = ''
+        RW_ManagerMatch        = 'No'
+        RO_ManagerMatch        = 'No'
+    }
+
+    # --- Process User Details ---
+
+    # Check for non-interactive group membership
+    if ($user.memberOf -like '*CN=deny_interactvie,*') {
+        $report.AccountType = 'Non-Interactive'
+    }
+
+    # Check for in-scope group membership
+    $inScopeGroups = $user.memberOf | Where-Object { $_ -match 'CN=(phase1|phase2|inscope),' } | ForEach-Object { ($_ -split ',')[0].Replace('CN=', '') }
+    if ($inScopeGroups) {
+        $report.InScopeGroups = $inScopeGroups -join ", "
+    }
+
+    # Calculate password age
+    if ($user.pwdLastSet -gt 0) {
+        $pwdLastSetDate = [datetime]::FromFileTime($user.pwdLastSet)
+        $report.PasswordLastSet = $pwdLastSetDate
+        $report.DaysSincePasswordReset = ((Get-Date) - $pwdLastSetDate).Days
+    }
+
+    # Get Manager details
+    if ($user.manager) {
+        try {
+            $manager = Get-ADUser -Identity $user.manager -Properties sAMAccountName, Name, EmailAddress, Department -ErrorAction Stop
+            $report.ManagerSAM = $manager.sAMAccountName
+            $report.ManagerName = $manager.Name
+            $report.ManagerEmail = $manager.EmailAddress
+            $report.ManagerDepartment = $manager.Department
+        }
+        catch { Write-Warning "Could not resolve manager: $($user.manager)" }
+    }
+
+    # --- Process Associated Groups (_RW and _RO) ---
+
+    # Check for the _RW group and its manager
+    try {
+        $rwGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RW" -Properties managedBy -ErrorAction Stop
+        $report.RW_GroupExists = 'Yes'
+        if ($rwGroup.managedBy) {
+            $rwManager = Get-ADUser -Identity $rwGroup.managedBy -Properties sAMAccountName -ErrorAction SilentlyContinue
+            if ($rwManager) { $report.RW_GroupManagerSAM = $rwManager.sAMAccountName }
+        }
+    }
+    catch {} # Suppress error if group doesn't exist
+
+    # Check for the _RO group and its manager
+    try {
+        $roGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RO" -Properties managedBy -ErrorAction Stop
+        $report.RO_GroupExists = 'Yes'
+        if ($roGroup.managedBy) {
+            $roManager = Get-ADUser -Identity $roGroup.managedBy -Properties sAMAccountName -ErrorAction SilentlyContinue
+            if ($roManager) { $report.RO_GroupManagerSAM = $roManager.sAMAccountName }
+        }
+    }
+    catch {} # Suppress error if group doesn't exist
+
+    # --- Final Comparisons ---
+    if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RW_GroupManagerSAM)) { $report.RW_ManagerMatch = 'Yes' }
+    if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RO_GroupManagerSAM)) { $report.RO_ManagerMatch = 'Yes' }
+
+    # --- Display the final, consolidated object ---
+    [PSCustomObject]$report
+
+}
+catch {
+    Write-Error "Failed to find or process account '$accountName'. Error: $($_.Exception.Message)"
+}
