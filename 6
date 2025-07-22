@@ -19,7 +19,7 @@ try {
     try { $rwGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RW" -Properties managedBy, member -ErrorAction Stop } catch {}
     try { $roGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RO" -Properties managedBy, member -ErrorAction Stop } catch {}
 
-    # --- Define the Report Structure ---
+    # --- Define the Main Report Structure ---
     $report = [ordered]@{
         sAMAccountName         = $user.sAMAccountName
         AccountType            = 'Interactive'
@@ -39,7 +39,6 @@ try {
         ManagerInRO_Group      = 'N/A'
         RW_ManagerMatch        = 'No'
         RO_ManagerMatch        = 'No'
-        AdditionalMemberChecks = @()
     }
 
     # --- Process User and Manager Details ---
@@ -93,32 +92,38 @@ try {
     if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RW_GroupManagerSAM)) { $report.RW_ManagerMatch = 'Yes' }
     if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RO_ManagerMatch)) { $report.RO_ManagerMatch = 'Yes' }
 
-    # --- Perform Additional User Membership Checks ---
-    $additionalChecks = foreach ($sam in $memberCheckUserSAMs) {
-        $checkResult = [ordered]@{
-            UserAccount = $sam
-            Status      = 'Not Found'
-            MemberOf_RW = 'No'
-            MemberOf_RO = 'No'
-        }
-        try {
-            $checkUser = Get-ADUser -Identity $sam -Properties DistinguishedName -ErrorAction Stop
-            $checkResult.Status = 'Found'
-            if ($rwGroup -and $rwGroup.member -contains $checkUser.DistinguishedName) {
-                $checkResult.MemberOf_RW = 'Yes'
-            }
-            if ($roGroup -and $roGroup.member -contains $checkUser.DistinguishedName) {
-                $checkResult.MemberOf_RO = 'Yes'
-            }
-        }
-        catch {}
-        [PSCustomObject]$checkResult
-    }
-    $report.AdditionalMemberChecks = $additionalChecks
+    # --- ✨ FIX: Display the main report and additional checks separately ---
 
-    # --- ✨ FIX: Display the final object as JSON for clear, complete output ---
-    # This prevents PowerShell from hiding the nested 'AdditionalMemberChecks' list.
-    [PSCustomObject]$report | ConvertTo-Json -Depth 5
+    # Display the main report object first
+    Write-Host "--- Primary Account Details: $($report.sAMAccountName) ---" -ForegroundColor Green
+    [PSCustomObject]$report
+
+    # Now, process and display the additional user checks as a separate table
+    if ($memberCheckUserSAMs.Count -gt 0) {
+        Write-Host "`n--- Additional User Membership Check ---" -ForegroundColor Green
+        $additionalChecks = foreach ($sam in $memberCheckUserSAMs) {
+            $checkResult = [ordered]@{
+                UserAccount = $sam
+                Status      = 'Not Found'
+                MemberOf_RW = 'No'
+                MemberOf_RO = 'No'
+            }
+            try {
+                $checkUser = Get-ADUser -Identity $sam -Properties DistinguishedName -ErrorAction Stop
+                $checkResult.Status = 'Found'
+                if ($rwGroup -and $rwGroup.member -contains $checkUser.DistinguishedName) {
+                    $checkResult.MemberOf_RW = 'Yes'
+                }
+                if ($roGroup -and $roGroup.member -contains $checkUser.DistinguishedName) {
+                    $checkResult.MemberOf_RO = 'Yes'
+                }
+            }
+            catch {}
+            [PSCustomObject]$checkResult
+        }
+        # Display the results which will format as a nice table
+        $additionalChecks
+    }
 
 }
 catch {
