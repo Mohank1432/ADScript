@@ -14,7 +14,6 @@ try {
     $user = Get-ADUser -Identity $targetAccountName -Properties manager, whenCreated, pwdLastSet, memberOf, DistinguishedName -ErrorAction Stop
 
     # --- Pre-fetch Associated Groups (_RW and _RO) ---
-    # Fetching these early allows us to use their data for multiple checks
     $rwGroup = $null
     $roGroup = $null
     try { $rwGroup = Get-ADGroup -Identity "$($user.sAMAccountName)_RW" -Properties managedBy, member -ErrorAction Stop } catch {}
@@ -40,7 +39,7 @@ try {
         ManagerInRO_Group      = 'N/A'
         RW_ManagerMatch        = 'No'
         RO_ManagerMatch        = 'No'
-        AdditionalMemberChecks = @() # Placeholder for the new check
+        AdditionalMemberChecks = @()
     }
 
     # --- Process User and Manager Details ---
@@ -68,7 +67,7 @@ try {
     # --- Process Associated Group Details ---
     if ($rwGroup) {
         $report.RW_GroupExists = 'Yes'
-        $report.ManagerInRW_Group = 'No' # Default to No if group exists
+        $report.ManagerInRW_Group = 'No'
         if ($rwGroup.managedBy) {
             $rwManager = Get-ADUser -Identity $rwGroup.managedBy -Properties sAMAccountName -ErrorAction SilentlyContinue
             if ($rwManager) { $report.RW_GroupManagerSAM = $rwManager.sAMAccountName }
@@ -80,7 +79,7 @@ try {
 
     if ($roGroup) {
         $report.RO_GroupExists = 'Yes'
-        $report.ManagerInRO_Group = 'No' # Default to No if group exists
+        $report.ManagerInRO_Group = 'No'
         if ($roGroup.managedBy) {
             $roManager = Get-ADUser -Identity $roGroup.managedBy -Properties sAMAccountName -ErrorAction SilentlyContinue
             if ($roManager) { $report.RO_GroupManagerSAM = $roManager.sAMAccountName }
@@ -92,9 +91,9 @@ try {
 
     # --- Perform Final Comparisons for Manager ---
     if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RW_GroupManagerSAM)) { $report.RW_ManagerMatch = 'Yes' }
-    if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RO_GroupManagerSAM)) { $report.RO_ManagerMatch = 'Yes' }
+    if (($report.ManagerSAM) -and ($report.ManagerSAM -eq $report.RO_ManagerMatch)) { $report.RO_ManagerMatch = 'Yes' }
 
-    # --- ✨ NEW: Perform Additional User Membership Checks ---
+    # --- Perform Additional User Membership Checks ---
     $additionalChecks = foreach ($sam in $memberCheckUserSAMs) {
         $checkResult = [ordered]@{
             UserAccount = $sam
@@ -112,15 +111,14 @@ try {
                 $checkResult.MemberOf_RO = 'Yes'
             }
         }
-        catch {} # Suppress error if user not found, Status will remain 'Not Found'
-        
-        # Output the result object for this user
+        catch {}
         [PSCustomObject]$checkResult
     }
     $report.AdditionalMemberChecks = $additionalChecks
 
-    # --- Display the final, consolidated object ---
-    [PSCustomObject]$report
+    # --- ✨ FIX: Display the final object as JSON for clear, complete output ---
+    # This prevents PowerShell from hiding the nested 'AdditionalMemberChecks' list.
+    [PSCustomObject]$report | ConvertTo-Json -Depth 5
 
 }
 catch {
