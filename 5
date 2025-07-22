@@ -10,7 +10,7 @@
     the user's manager is a member of these groups.
 
 .NOTES
-    Version: 1.8 (Updated)
+    Version: 1.9 (Corrected)
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Execution Policy: The script must be run under an execution policy that allows script execution (e.g., RemoteSigned).
@@ -93,10 +93,7 @@ Try {
     for ($i = 0; $i -lt $groupCount; $i += $batchSize) {
         $batch = $potentialGroupNames.GetRange($i, [System.Math]::Min($batchSize, $groupCount - $i))
         $groupLDAPFilter = "(|" + ($batch | ForEach-Object { "(sAMAccountName=$_)" }) + ")"
-        
-        # ✨ NEW: Added 'member' to the list of properties to fetch for the groups
         $foundGroups = Get-ADGroup -LDAPFilter $groupLDAPFilter -Properties managedBy, member -ErrorAction SilentlyContinue
-        
         foreach ($group in $foundGroups) {
             if ($group.sAMAccountName.EndsWith("_RW")) { $rwGroupCache[$group.sAMAccountName] = $group }
             elseif ($group.sAMAccountName.EndsWith("_RO")) { $roGroupCache[$group.sAMAccountName] = $group }
@@ -117,7 +114,6 @@ Try {
         $processedCount++
         Write-Progress -Activity "Processing Users" -Status "Processing $($user.sAMAccountName) ($processedCount of $totalUsers)" -PercentComplete (($processedCount / $totalUsers) * 100)
 
-        # ✨ NEW: Added ManagerInRW_Group and ManagerInRO_Group columns
         $reportObject = [PSCustomObject]@{
             sAMAccountName         = $user.sAMAccountName
             AccountType            = 'Interactive'
@@ -168,14 +164,13 @@ Try {
         if ($rwGroupCache.ContainsKey($rwGroupName)) {
             $reportObject.RW_GroupExists = 'Yes'
             $rwGroup = $rwGroupCache[$rwGroupName]
-            $reportObject.ManagerInRW_Group = 'No' # Set default to No since group exists
+            $reportObject.ManagerInRW_Group = 'No'
             if ($rwGroup.managedBy) {
                 try {
                     $rwManagerUser = Get-ADUser -Identity $rwGroup.managedBy -Properties sAMAccountName -ErrorAction Stop
                     $reportObject.RW_GroupManagerSAM = $rwManagerUser.sAMAccountName
                 } catch { Write-Warning "Could not resolve manager for group '$($rwGroup.sAMAccountName)'. Error: $($_.Exception.Message)" }
             }
-            # ✨ NEW: Check if manager is a member of the RW group
             if ($managerUser -and $rwGroup.member -contains $managerUser.DistinguishedName) {
                 $reportObject.ManagerInRW_Group = 'Yes'
             }
@@ -185,21 +180,21 @@ Try {
         if ($roGroupCache.ContainsKey($roGroupName)) {
             $reportObject.RO_GroupExists = 'Yes'
             $roGroup = $roGroupCache[$roGroupName]
-            $reportObject.ManagerInRO_Group = 'No' # Set default to No since group exists
+            $reportObject.ManagerInRO_Group = 'No'
             if ($roGroup.managedBy) {
                 try {
                     $roManagerUser = Get-ADUser -Identity $roGroup.managedBy -Properties sAMAccountName -ErrorAction Stop
                     $reportObject.RO_GroupManagerSAM = $roManagerUser.sAMAccountName
                 } catch { Write-Warning "Could not resolve manager for group '$($roGroup.sAMAccountName)'. Error: $($_.Exception.Message)" }
             }
-            # ✨ NEW: Check if manager is a member of the RO group
             if ($managerUser -and $roGroup.member -contains $managerUser.DistinguishedName) {
                 $reportObject.ManagerInRO_Group = 'Yes'
             }
         }
 
-        if (($reportObject.ManagerSAM -ne '') -and ($reportObject.RW_GroupManagerSAM -ne '') -and ($reportObject.ManagerSAM -eq $reportObject.RW_GroupManagerSAM)) { $reportObject.RW_ManagerMatch = 'Yes' }
-        if (($reportObject.ManagerSAM -ne '') -and ($reportObject.RO_GroupManagerSAM -ne '') -and ($reportObject.ManagerSAM -eq $reportObject.RO_GroupManagerSAM)) { $reportObject.RO_ManagerMatch = 'Yes' }
+        # ✨ FIX: Trim whitespace from SAM account names before comparing them for a reliable match.
+        if (($reportObject.ManagerSAM -ne '') -and ($reportObject.RW_GroupManagerSAM -ne '') -and ($reportObject.ManagerSAM.Trim() -eq $reportObject.RW_GroupManagerSAM.Trim())) { $reportObject.RW_ManagerMatch = 'Yes' }
+        if (($reportObject.ManagerSAM -ne '') -and ($reportObject.RO_GroupManagerSAM -ne '') -and ($reportObject.ManagerSAM.Trim() -eq $reportObject.RO_GroupManagerSAM.Trim())) { $reportObject.RO_ManagerMatch = 'Yes' }
 
         [void]$resultsList.Add($reportObject)
     }
