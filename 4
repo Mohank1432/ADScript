@@ -17,7 +17,7 @@
     Finally, it verifies the existence of corresponding _RW and _RO groups, their managers, and checks
     if the user's manager is a member of those groups.
 .NOTES
-    Version: 4.0
+    Version: 4.1
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Permissions: The executing account needs read permissions for user and group objects in Active Directory.
@@ -74,7 +74,7 @@ Try {
         'PS_SvcAcc_365DaysRotation' = 365
     }
     
-    # Number of days before expiry to send a notification.
+    # Number of days before expiry to send a notification for the phased plan.
     $NotificationLeadTimeDays = 30
 
     #----------------------------------------------------------------------------
