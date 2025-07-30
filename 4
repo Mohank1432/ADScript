@@ -17,7 +17,7 @@
     Finally, it verifies the existence of corresponding _RW and _RO groups, their managers, and checks
     if the user's manager is a member of those groups.
 .NOTES
-    Version: 4.1
+    Version: 4.2
     Author: Senior PowerShell and Active Directory Automation Specialist
     Prerequisites: Active Directory module for Windows PowerShell (RSAT-AD-PowerShell).
     Permissions: The executing account needs read permissions for user and group objects in Active Directory.
@@ -94,9 +94,9 @@ Try {
     }
 
     # Add timestamp to output file path
-    $baseName =::GetFileNameWithoutExtension($OutputPath)
-    $extension =::GetExtension($OutputPath)
-    $directory =::GetDirectoryName($OutputPath)
+    $baseName  = [System.IO.Path]::GetFileNameWithoutExtension($OutputPath)
+    $extension = [System.IO.Path]::GetExtension($OutputPath)
+    $directory = [System.IO.Path]::GetDirectoryName($OutputPath)
     $OutputPath = Join-Path -Path $directory -ChildPath "$baseName`_$Timestamp$extension"
 
     #============================================================================
@@ -108,15 +108,21 @@ Try {
     if (-not [string]::IsNullOrEmpty($InputCsvPath) -and (Test-Path -Path $InputCsvPath -PathType Leaf)) {
         Write-Host "Input CSV file specified. Reading users from: $InputCsvPath"
         try {
-            $samAccountNames = (Import-Csv -Path $InputCsvPath).$CsvHeaderName
+            # Handle potential file extension difference for Import-Csv vs Get-Content
+            if ([System.IO.Path]::GetExtension($InputCsvPath) -eq '.txt') {
+                 $samAccountNames = Get-Content -Path $InputCsvPath
+            } else {
+                 $samAccountNames = (Import-Csv -Path $InputCsvPath).$CsvHeaderName
+            }
+            
             if ($null -eq $samAccountNames -or $samAccountNames.Count -eq 0) {
-                throw "CSV file is empty or the header '$CsvHeaderName' was not found."
+                throw "Input file is empty or the header '$CsvHeaderName' was not found (if CSV)."
             }
             $userFilterFromCsv = '(|' + ($samAccountNames | ForEach-Object { "(sAMAccountName=$_)" }) + ')'
             $adUsers = Get-ADUser -LDAPFilter $userFilterFromCsv -Properties manager, whenCreated, pwdLastSet, memberOf, company, DistinguishedName -ErrorAction Stop
         }
         catch {
-            throw "Failed to read or process the input CSV file '$InputCsvPath'. Error: $($_.Exception.Message)"
+            throw "Failed to read or process the input file '$InputCsvPath'. Error: $($_.Exception.Message)"
         }
     }
     else {
@@ -132,7 +138,7 @@ Try {
     $inScopeGroupLookup = @{}
     if ($InScopeGroupNames.Count -gt 0) {
         $groupFilter = '(|' + ($InScopeGroupNames | ForEach-Object { "(sAMAccountName=$_)" }) + ')'
-        Get-ADGroup -LDAPFilter $groupFilter | ForEach-Object { $inScopeGroupLookup = $_.sAMAccountName }
+        Get-ADGroup -LDAPFilter $groupFilter -Properties sAMAccountName, DistinguishedName | ForEach-Object { $inScopeGroupLookup[$_.DistinguishedName] = $_.sAMAccountName }
     }
     Write-Host "$($inScopeGroupLookup.Count) in-scope groups cached."
     
@@ -140,13 +146,13 @@ Try {
     Write-Verbose "Caching members of the '$NonInteractiveGroupName' group..."
     $nonInteractiveUserCache = @{}
     try {
-        Get-ADGroupMember -Identity $NonInteractiveGroupName -ErrorAction Stop | ForEach-Object { $nonInteractiveUserCache = $true }
+        Get-ADGroupMember -Identity $NonInteractiveGroupName -ErrorAction Stop | ForEach-Object { $nonInteractiveUserCache[$_.DistinguishedName] = $true }
         Write-Host "$($nonInteractiveUserCache.Count) non-interactive users cached."
     }
     catch { Write-Warning "Could not find or read members from the group '$NonInteractiveGroupName'. All users will be marked as Interactive." }
 
     # 1.4: Pre-cache all potential _RW and _RO groups and their members/managers
-    $potentialGroupNames =]::new()
+    $potentialGroupNames = [System.Collections.Generic.List[string]]::new()
     foreach ($user in $adUsers) {
         $potentialGroupNames.Add("$($user.sAMAccountName)_RW")
         $potentialGroupNames.Add("$($user.sAMAccountName)_RO")
@@ -155,9 +161,9 @@ Try {
     $roGroupCache = @{}
     $batchSize = 400
     for ($i = 0; $i -lt $potentialGroupNames.Count; $i += $batchSize) {
-        $batch = $potentialGroupNames.GetRange($i,::Min($batchSize, $potentialGroupNames.Count - $i))
+        $batch = $potentialGroupNames.GetRange($i, [System.Math]::Min($batchSize, $potentialGroupNames.Count - $i))
         $groupLDAPFilter = "(|" + ($batch | ForEach-Object { "(sAMAccountName=$_)" }) + ")"
-        $foundGroups = Get-ADGroup -LDAPFilter $groupLDAPFilter -Properties managedBy, member -ErrorAction SilentlyContinue
+        $foundGroups = Get-ADGroup -LDAPFilter $groupLDAPFilter -Properties managedBy, member, sAMAccountName -ErrorAction SilentlyContinue
         foreach ($group in $foundGroups) {
             if ($group.sAMAccountName.EndsWith("_RW")) { $rwGroupCache[$group.sAMAccountName] = $group }
             elseif ($group.sAMAccountName.EndsWith("_RO")) { $roGroupCache[$group.sAMAccountName] = $group }
@@ -169,7 +175,7 @@ Try {
     # PHASE 2: PER-USER PROCESSING AND DATA ENRICHMENT
     #============================================================================
     Write-Host "Phase 2: Starting per-user processing and data enrichment..."
-    $resultsList =::new()
+    $resultsList = [System.Collections.Generic.List[object]]::new()
     $today = (Get-Date).Date
 
     foreach ($user in $adUsers) {
@@ -203,24 +209,33 @@ Try {
         }
         
         $passwordLastSetDate = if ($user.pwdLastSet -gt 0) { [datetime]::FromFileTime($user.pwdLastSet) } else { $null }
-        if ($passwordLastSetDate) { $reportObject.PasswordLastSet = $passwordLastSetDate; $reportObject.DaysSincePasswordReset = ($today - $passwordLastSetDate.Date).Days }
+        if ($passwordLastSetDate) { 
+            $reportObject.PasswordLastSet = $passwordLastSetDate
+            $reportObject.DaysSincePasswordReset = ($today - $passwordLastSetDate.Date).Days 
+        }
         if ($nonInteractiveUserCache.ContainsKey($user.DistinguishedName)) { $reportObject.AccountType = 'Non-Interactive' }
         
         $managerUser = $null
         if (-not [string]::IsNullOrEmpty($user.manager)) {
             try {
                 $managerUser = Get-ADUser -Identity $user.manager -Properties sAMAccountName, Name, EmailAddress, Department, DistinguishedName -ErrorAction Stop
-                $reportObject.ManagerSAM = $managerUser.sAMAccountName; $reportObject.ManagerName = $managerUser.Name; $reportObject.ManagerEmail = $managerUser.EmailAddress; $reportObject.ManagerDepartment = $managerUser.Department
+                $reportObject.ManagerSAM = $managerUser.sAMAccountName
+                $reportObject.ManagerName = $managerUser.Name
+                $reportObject.ManagerEmail = $managerUser.EmailAddress
+                $reportObject.ManagerDepartment = $managerUser.Department
             } catch { Write-Warning "Could not resolve manager with DN '$($user.manager)' for user '$($user.sAMAccountName)'. Error: $($_.Exception.Message)" }
         }
 
         $userInScopeGroups = @(); $policyApplied = $false; $expiryDate = $null
         foreach ($groupDN in $user.memberOf) {
             if ($inScopeGroupLookup.ContainsKey($groupDN)) {
-                $groupName = $inScopeGroupLookup; $userInScopeGroups += $groupName
+                $groupName = $inScopeGroupLookup[$groupDN]
+                $userInScopeGroups += $groupName
                 if (-not $policyApplied -and $RotationPolicyMap.ContainsKey($groupName)) {
                     $policyDays = $RotationPolicyMap[$groupName]
-                    if ($policyDays -eq -1) { $reportObject.PasswordPolicyDays = "No Rotation" }
+                    if ($policyDays -eq -1) { 
+                        $reportObject.PasswordPolicyDays = "No Rotation" 
+                    }
                     else {
                         $reportObject.PasswordPolicyDays = $policyDays
                         if ($passwordLastSetDate) { 
@@ -263,14 +278,18 @@ Try {
 
         $rwGroupName = "$($user.sAMAccountName)_RW"
         if ($rwGroupCache.ContainsKey($rwGroupName)) {
-            $reportObject.RW_GroupExists = 'Yes'; $reportObject.ManagerInRW_Group = 'No'; $rwGroup = $rwGroupCache[$rwGroupName]
+            $reportObject.RW_GroupExists = 'Yes'
+            $reportObject.ManagerInRW_Group = 'No'
+            $rwGroup = $rwGroupCache[$rwGroupName]
             if ($rwGroup.managedBy) { try { $reportObject.RW_GroupManagerSAM = (Get-ADUser -Identity $rwGroup.managedBy -Properties sAMAccountName -EA Stop).sAMAccountName } catch { Write-Warning "Could not resolve manager for group '$rwGroupName'."} }
             if ($managerUser -and $rwGroup.member -contains $managerUser.DistinguishedName) { $reportObject.ManagerInRW_Group = 'Yes' }
         }
 
         $roGroupName = "$($user.sAMAccountName)_RO"
         if ($roGroupCache.ContainsKey($roGroupName)) {
-            $reportObject.RO_GroupExists = 'Yes'; $reportObject.ManagerInRO_Group = 'No'; $roGroup = $roGroupCache[$roGroupName]
+            $reportObject.RO_GroupExists = 'Yes'
+            $reportObject.ManagerInRO_Group = 'No'
+            $roGroup = $roGroupCache[$roGroupName]
             if ($roGroup.managedBy) { try { $reportObject.RO_GroupManagerSAM = (Get-ADUser -Identity $roGroup.managedBy -Properties sAMAccountName -EA Stop).sAMAccountName } catch { Write-Warning "Could not resolve manager for group '$roGroupName'."} }
             if ($managerUser -and $roGroup.member -contains $managerUser.DistinguishedName) { $reportObject.ManagerInRO_Group = 'Yes' }
         }
